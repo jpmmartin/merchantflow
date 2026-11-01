@@ -1,0 +1,11 @@
+{
+  "name": "merchantflow",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@12.16.1",
+  "engines": {
+    "node": ">=26.13.0 <27",
+    "pnpm": "12.16.1"
+  }
+}
