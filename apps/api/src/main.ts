@@ -1,9 +1,11 @@
 import { NestFactory } from '@nestjs/core';
+import { ConfigService } from '@nestjs/config';
 import { AppModule } from './app.module.js';
-
-const PORT = 3000;
-// Listening on all interfaces lets Docker publish the port to the host.
-const HOST = '0.0.0.0';
+import type { Env } from './modules/config/env.schema.js';
 
 const app = await NestFactory.create(AppModule);
-await app.listen(PORT, HOST);
+const config = app.get<ConfigService<Env, true>>(ConfigService);
+await app.listen(
+  config.get('PORT', { infer: true }),
+  config.get('HOST', { infer: true }),
+);

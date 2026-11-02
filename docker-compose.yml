@@ -27,6 +27,9 @@ services:
       - '0'
     environment:
       PNPM_STORE_DIR: /pnpm/store
+      # A server bound to the container's loopback is unreachable through a
+      # published port, so the API must listen on all interfaces here.
+      HOST: 0.0.0.0
     volumes:
       - .:/workspace
       - node-modules:/workspace/node_modules

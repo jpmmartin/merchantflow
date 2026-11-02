@@ -20,6 +20,21 @@ export default defineConfig(
     },
   },
   {
+    files: ['**/*.ts'],
+    rules: {
+      // `@nestjs/config` is the only reader of the environment; code receives
+      // validated values through `ConfigService`.
+      'no-restricted-properties': [
+        'error',
+        {
+          object: 'process',
+          property: 'env',
+          message: 'Read configuration through ConfigService, not process.env.',
+        },
+      ],
+    },
+  },
+  {
     files: ['**/*.mjs'],
     extends: [tseslint.configs.disableTypeChecked],
   },
