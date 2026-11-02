@@ -12,6 +12,7 @@
     "dev": "pnpm --filter @merchantflow/api dev",
     "build": "pnpm --filter @merchantflow/api build",
     "test": "pnpm --filter @merchantflow/api test",
+    "test:integration": "pnpm -r --if-present test:integration",
     "lint": "eslint .",
     "format": "prettier --write --no-error-on-unmatched-pattern \"apps/**/*.{ts,json}\" \"packages/**/*.{ts,json}\" \"*.{mjs,json,yml}\"",
     "format:check": "prettier --check --no-error-on-unmatched-pattern \"apps/**/*.{ts,json}\" \"packages/**/*.{ts,json}\" \"*.{mjs,json,yml}\"",
