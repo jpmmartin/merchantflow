@@ -1,3 +1,4 @@
+import type { Server } from 'node:http';
 import type { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
@@ -7,6 +8,7 @@ import { GetLivenessService } from '../src/modules/health/application/get-livene
 
 describe('GET /health/live', () => {
   let app: INestApplication;
+  let server: Server;
 
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({
@@ -14,6 +16,8 @@ describe('GET /health/live', () => {
     }).compile();
     app = moduleRef.createNestApplication();
     await app.init();
+    // Nest types the HTTP server as `any`; it is a Node HTTP server for the Express adapter.
+    server = app.getHttpServer() as Server;
   });
 
   afterAll(async () => {
@@ -21,7 +25,7 @@ describe('GET /health/live', () => {
   });
 
   it('responds 200 with an ok status', async () => {
-    const response = await request(app.getHttpServer()).get('/health/live');
+    const response = await request(server).get('/health/live');
 
     expect(response.status).toBe(200);
     expect(response.headers['content-type']).toMatch(/application\/json/);
@@ -32,7 +36,7 @@ describe('GET /health/live', () => {
     const provider = app.get(GetLivenessService);
     const execute = vi.spyOn(provider, 'execute');
 
-    const response = await request(app.getHttpServer()).get('/health/live');
+    const response = await request(server).get('/health/live');
 
     expect(response.status).toBe(200);
     expect(execute).toHaveBeenCalledTimes(1);

@@ -11,6 +11,17 @@
   "scripts": {
     "dev": "pnpm --filter @merchantflow/api dev",
     "build": "pnpm --filter @merchantflow/api build",
-    "test": "pnpm --filter @merchantflow/api test"
+    "test": "pnpm --filter @merchantflow/api test",
+    "lint": "eslint .",
+    "format": "prettier --write --no-error-on-unmatched-pattern \"apps/**/*.{ts,json}\" \"packages/**/*.{ts,json}\" \"*.{mjs,json,yml}\"",
+    "format:check": "prettier --check --no-error-on-unmatched-pattern \"apps/**/*.{ts,json}\" \"packages/**/*.{ts,json}\" \"*.{mjs,json,yml}\"",
+    "typecheck": "pnpm -r --if-present typecheck"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "eslint": "10.14.0",
+    "prettier": "3.9.10",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.72.1"
   }
 }
