@@ -1,4 +1,8 @@
-import { MERCHANT_STATUSES } from '@merchantflow/domain';
+import {
+  CURRENCY_EXPONENTS,
+  MERCHANT_STATUSES,
+  isSupportedCurrency,
+} from '@merchantflow/domain';
 import { z } from 'zod';
 import { MERCHANT_API_KEY_ROLES } from '../../auth/application/api-key-scope.js';
 import { decodeMerchantCursor } from './merchant-cursor.js';
@@ -18,7 +22,13 @@ const displayName = text(100);
 const businessType = text(50);
 const industry = text(100);
 const countryCode = z.string().regex(/^[A-Z]{2}$/);
-const currencyCode = z.string().regex(/^[A-Z]{3}$/);
+
+// The column checks only the format of the currency (AD-44). The currencies
+// Money supports are the keys of its exponent table, and every other code is
+// refused here, so the OpenAPI document lists exactly the supported codes.
+const SUPPORTED_CURRENCIES =
+  Object.keys(CURRENCY_EXPONENTS).filter(isSupportedCurrency);
+const currencyCode = z.enum(SUPPORTED_CURRENCIES);
 
 export const merchantIdParamSchema = z.uuid();
 export const apiKeyIdParamSchema = z.uuid();
@@ -30,7 +40,7 @@ export const createMerchantSchema = z.strictObject({
   industry: industry.describe('Industry the merchant operates in.'),
   country_code: countryCode.describe('ISO 3166-1 alpha-2 country code.'),
   default_currency: currencyCode.describe(
-    'ISO 4217 currency code. It cannot be changed afterwards.',
+    `ISO 4217 currency code. Supported: ${SUPPORTED_CURRENCIES.join(', ')}. It cannot be changed afterwards.`,
   ),
 });
 

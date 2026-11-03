@@ -156,6 +156,7 @@ describe('OpenAPI document of the merchant endpoints', () => {
       'country_code',
       'default_currency',
     ]);
+    expect(create?.properties?.['default_currency']?.enum).toEqual(['USD']);
     expect(status?.additionalProperties).toBe(false);
     expect(status?.properties?.['status']?.enum).toEqual([
       'DRAFT',

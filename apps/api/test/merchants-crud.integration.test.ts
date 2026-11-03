@@ -147,6 +147,16 @@ describe('merchant create, read, list, and update', () => {
         { ...VALID, default_currency: 'US' },
         ['default_currency'],
       ],
+      [
+        'a well-formed default_currency that is not supported',
+        { ...VALID, default_currency: 'EUR' },
+        ['default_currency'],
+      ],
+      [
+        'a well-formed default_currency that is no currency',
+        { ...VALID, default_currency: 'ZZZ' },
+        ['default_currency'],
+      ],
       ['a number as legal_name', { ...VALID, legal_name: 7 }, ['legal_name']],
       ['an unknown field', { ...VALID, nickname: 'x' }, []],
       ['a status', { ...VALID, status: 'ACTIVE' }, []],
@@ -175,6 +185,18 @@ describe('merchant create, read, list, and update', () => {
         );
       }
       expect(await api.state()).toEqual(before);
+    });
+
+    it('reports an unsupported default_currency as one issue with its field and rule code', async () => {
+      const response = await api.post(api.platform.key, `${API}/merchants`, {
+        ...VALID,
+        default_currency: 'EUR',
+      });
+
+      expect(response.status).toBe(400);
+      expect(issuesOf(response)).toEqual([
+        { path: ['default_currency'], code: 'invalid_value' },
+      ]);
     });
 
     it('rejects a body that is not an object, and a missing body', async () => {

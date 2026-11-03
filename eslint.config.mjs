@@ -68,6 +68,41 @@ export default defineConfig(
     },
   },
   {
+    // Amounts are `bigint` from the API string to the database column and never
+    // pass through `number`, which rounds above 2^53 - 1 (AD-60). The money code
+    // cannot use `Number`, the globals that return or coerce to a number,
+    // `Math`, `JSON` (it reads every numeric literal as a double), or the global
+    // object that would reach them, and it cannot use unary plus.
+    files: ['packages/domain/src/money/**/*.ts'],
+    rules: {
+      'no-restricted-globals': [
+        'error',
+        ...[
+          ['Number', 'Number() and Number.* convert through a double.'],
+          ['parseInt', 'parseInt returns a number.'],
+          ['parseFloat', 'parseFloat returns a number.'],
+          ['isNaN', 'isNaN coerces its argument to a number.'],
+          ['isFinite', 'isFinite coerces its argument to a number.'],
+          ['Math', 'Math works on numbers.'],
+          ['JSON', 'JSON.parse reads every numeric literal as a double.'],
+          ['globalThis', 'The global object would reach Number and Math.'],
+          ['global', 'The global object would reach Number and Math.'],
+        ].map(([name, reason]) => ({
+          name,
+          message: `${reason} Amounts stay bigint and never pass through number.`,
+        })),
+      ],
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector: "UnaryExpression[operator='+']",
+          message:
+            'Unary plus converts to number. Amounts stay bigint and never pass through number.',
+        },
+      ],
+    },
+  },
+  {
     files: ['**/*.mjs'],
     extends: [tseslint.configs.disableTypeChecked],
   },
