@@ -7,6 +7,9 @@ import { configDefaults, defineConfig } from 'vitest/config';
 export default defineConfig({
   test: {
     environment: 'node',
+    // Request logs would flood the test output; tests that assert on logs
+    // raise the level themselves.
+    env: { LOG_LEVEL: 'silent' },
     fsModuleCache: false,
     include: ['src/**/*.test.ts', 'test/**/*.test.ts'],
     exclude: [...configDefaults.exclude, '**/*.integration.test.ts'],

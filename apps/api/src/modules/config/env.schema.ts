@@ -16,6 +16,9 @@ export const envSchema = z.object({
     .transform(Number)
     .pipe(z.number().int().min(1).max(TCP_PORT_MAX))
     .default(3000),
+  LOG_LEVEL: z
+    .enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent'])
+    .default('info'),
   HOST: z.union([z.ipv4(), z.ipv6()]).default('127.0.0.1'),
 });
 

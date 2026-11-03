@@ -26,6 +26,7 @@ describe('validateEnv', () => {
       NODE_ENV: 'development',
       PORT: 3000,
       HOST: '127.0.0.1',
+      LOG_LEVEL: 'info',
     });
   });
 
@@ -36,6 +37,7 @@ describe('validateEnv', () => {
       NODE_ENV: 'production',
       PORT: 8080,
       HOST: '0.0.0.0',
+      LOG_LEVEL: 'info',
     });
   });
 
@@ -44,6 +46,7 @@ describe('validateEnv', () => {
       NODE_ENV: 'development',
       PORT: 3000,
       HOST: '127.0.0.1',
+      LOG_LEVEL: 'info',
     });
   });
 
@@ -61,6 +64,22 @@ describe('validateEnv', () => {
     (host) => {
       const error = captureError(() => validateEnv({ HOST: host }));
       expect(error.variables).toEqual(['HOST']);
+    },
+  );
+
+  it.each(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent'])(
+    'accepts LOG_LEVEL=%s',
+    (level) => {
+      expect(validateEnv({ LOG_LEVEL: level }).LOG_LEVEL).toBe(level);
+    },
+  );
+
+  it.each(['verbose', 'INFO', '', '10'])(
+    'rejects LOG_LEVEL=%j without echoing it',
+    (level) => {
+      const error = captureError(() => validateEnv({ LOG_LEVEL: level }));
+      expect(error.variables).toEqual(['LOG_LEVEL']);
+      expect(error.message).not.toContain(`(${level})`);
     },
   );
 
