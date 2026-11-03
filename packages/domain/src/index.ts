@@ -48,3 +48,15 @@ export {
   type MerchantTransitionFailure,
   type MerchantTransitionResult,
 } from './merchant/merchant-transition.js';
+export {
+  PAYMENT_INTENT_STATUSES,
+  type PaymentIntent,
+  type PaymentIntentStatus,
+} from './payment-intent/payment-intent.js';
+export {
+  MAX_UNSUCCESSFUL_ATTEMPTS,
+  evaluatePaymentIntentTransition,
+  type PaymentIntentTransitionContext,
+  type PaymentIntentTransitionFailure,
+  type PaymentIntentTransitionResult,
+} from './payment-intent/payment-intent-transition.js';
