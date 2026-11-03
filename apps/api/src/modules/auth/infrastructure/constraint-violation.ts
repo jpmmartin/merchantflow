@@ -18,3 +18,20 @@ export function isForeignKeyViolation(
     error.constraint === constraint
   );
 }
+
+const UNIQUE_VIOLATION = '23505';
+
+/**
+ * Tells whether an error is PostgreSQL's unique violation for the named
+ * constraint. Any other error is not matched, so the caller still sees it.
+ */
+export function isUniqueViolation(error: unknown, constraint: string): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    error.code === UNIQUE_VIOLATION &&
+    'constraint' in error &&
+    error.constraint === constraint
+  );
+}

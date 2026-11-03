@@ -21,6 +21,8 @@ services:
     working_dir: /workspace
     ports:
       - '127.0.0.1:3000:3000'
+      # Vite development server of apps/web (`pnpm dev:web`).
+      - '127.0.0.1:5173:5173'
     # Docker Desktop exposes the socket as root:root with mode 0660, so the
     # unprivileged node user joins the root group to reach it.
     group_add:
@@ -28,7 +30,8 @@ services:
     environment:
       PNPM_STORE_DIR: /pnpm/store
       # A server bound to the container's loopback is unreachable through a
-      # published port, so the API must listen on all interfaces here.
+      # published port, so the API and the Vite server listen on all interfaces
+      # here.
       HOST: 0.0.0.0
       # Same credentials as the `postgres` service, reached by its service name
       # on the Compose network. A POSTGRES_PASSWORD with reserved URL characters

@@ -12,7 +12,10 @@ import {
 } from '@merchantflow/domain';
 import { Inject, Injectable } from '@nestjs/common';
 import { appendAuditEvent } from '../../audit/infrastructure/audit-event-queries.js';
-import type { Principal } from '../../auth/application/principal.js';
+import {
+  auditActorOf,
+  type Principal,
+} from '../../auth/application/principal.js';
 import { CLOCK, type Clock } from '../../clock/clock.js';
 import { DATABASE } from '../../database/database.module.js';
 import { ClaimIdempotencyKeyService } from '../../idempotency/application/claim-idempotency-key.service.js';
@@ -214,8 +217,7 @@ export class CreatePaymentIntentService {
     await appendAuditEvent(trx, {
       id: randomUUID(),
       occurredAt: stored.createdAt,
-      actorType: 'API_KEY',
-      actorId: command.principal.apiKeyId,
+      ...auditActorOf(command.principal),
       action: 'PAYMENT_INTENT_CREATED',
       targetType: 'PAYMENT_INTENT',
       targetId: stored.id,

@@ -16,7 +16,8 @@ export type ApiKeyRole = PlatformApiKeyRole | MerchantApiKeyRole;
 /**
  * What a key may act on. A merchant key belongs to one merchant and has a
  * merchant role; a platform key belongs to no merchant. The
- * `api_keys_role_scope_check` constraint enforces the same pairing.
+ * `api_keys_role_scope_check` constraint enforces the same pairing. Users have
+ * the same scope, enforced by `users_role_scope_check`.
  */
 export type ApiKeyScope =
   | { readonly kind: 'PLATFORM'; readonly role: PlatformApiKeyRole }

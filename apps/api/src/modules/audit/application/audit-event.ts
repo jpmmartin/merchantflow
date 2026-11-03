@@ -1,5 +1,5 @@
 /** Kinds of actor that can cause an audited action. */
-export const AUDIT_ACTOR_TYPES = ['API_KEY', 'SYSTEM'] as const;
+export const AUDIT_ACTOR_TYPES = ['API_KEY', 'SYSTEM', 'USER'] as const;
 
 export type AuditActorType = (typeof AUDIT_ACTOR_TYPES)[number];
 
@@ -24,7 +24,10 @@ export interface AuditEvent {
   /** Supplied by the caller from the injected clock. */
   readonly occurredAt: Date;
   readonly actorType: AuditActorType;
-  /** API key identifier for `API_KEY`, or a fixed component name for `SYSTEM`. */
+  /**
+   * API key identifier for `API_KEY`, user identifier for `USER`, or a fixed
+   * component name for `SYSTEM`.
+   */
   readonly actorId: string;
   /** Upper snake case code, for example `MERCHANT_STATUS_CHANGED`. */
   readonly action: string;

@@ -1,4 +1,12 @@
-import { hash, randomBytes, timingSafeEqual } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
+import {
+  LOOKUP_ID_BYTES,
+  SECRET_BYTES,
+  hashTokenSecret,
+  opaqueTokenFormat,
+  verifyTokenSecret,
+  type RandomSource,
+} from './opaque-token.js';
 
 /**
  * Key format: `mfk_<lookup id>_<secret>`.
@@ -19,15 +27,9 @@ import { hash, randomBytes, timingSafeEqual } from 'node:crypto';
  * every authenticated request.
  */
 export const API_KEY_PREFIX = 'mfk';
-export const LOOKUP_ID_BYTES = 8;
-export const SECRET_BYTES = 32;
+export { LOOKUP_ID_BYTES, SECRET_BYTES, type RandomSource };
 
-const API_KEY_PATTERN = new RegExp(
-  `^${API_KEY_PREFIX}_([0-9a-f]{${LOOKUP_ID_BYTES * 2}})_([0-9a-f]{${SECRET_BYTES * 2}})$`,
-);
-
-/** Source of random bytes. Tests replace it to get a known key. */
-export type RandomSource = (size: number) => Buffer;
+const API_KEY_FORMAT = opaqueTokenFormat(API_KEY_PREFIX);
 
 /** A newly generated key. `key` is the only place the secret appears. */
 export interface GeneratedApiKey {
@@ -46,19 +48,18 @@ export interface ParsedApiKey {
 
 /** Returns the SHA-256 of a secret as 64 lowercase hexadecimal characters. */
 export function hashApiKeySecret(secret: string): string {
-  return hash('sha256', secret, 'hex');
+  return hashTokenSecret(secret);
 }
 
 /** Generates a key with a fresh lookup id and secret. */
 export function generateApiKey(
   randomSource: RandomSource = randomBytes,
 ): GeneratedApiKey {
-  const lookupId = randomSource(LOOKUP_ID_BYTES).toString('hex');
-  const secret = randomSource(SECRET_BYTES).toString('hex');
+  const generated = API_KEY_FORMAT.generate(randomSource);
   return {
-    key: `${API_KEY_PREFIX}_${lookupId}_${secret}`,
-    lookupId,
-    secretHash: hashApiKeySecret(secret),
+    key: generated.token,
+    lookupId: generated.lookupId,
+    secretHash: generated.secretHash,
   };
 }
 
@@ -68,14 +69,7 @@ export function generateApiKey(
  * normalize its input.
  */
 export function parseApiKey(presented: string): ParsedApiKey | undefined {
-  const match = API_KEY_PATTERN.exec(presented);
-  if (match === null) {
-    return undefined;
-  }
-  const [, lookupId, secret] = match;
-  return lookupId === undefined || secret === undefined
-    ? undefined
-    : { lookupId, secret };
+  return API_KEY_FORMAT.parse(presented);
 }
 
 /**
@@ -87,10 +81,5 @@ export function verifyApiKeySecret(
   presentedSecret: string,
   storedHash: string,
 ): boolean {
-  const presentedDigest = Buffer.from(hashApiKeySecret(presentedSecret), 'hex');
-  const storedDigest = Buffer.from(storedHash, 'hex');
-  return (
-    presentedDigest.length === storedDigest.length &&
-    timingSafeEqual(presentedDigest, storedDigest)
-  );
+  return verifyTokenSecret(presentedSecret, storedHash);
 }

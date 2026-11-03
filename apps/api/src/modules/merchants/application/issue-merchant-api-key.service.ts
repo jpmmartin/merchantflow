@@ -2,8 +2,11 @@ import { Injectable } from '@nestjs/common';
 import type { ApiKey } from '../../auth/application/api-key.js';
 import type { MerchantApiKeyRole } from '../../auth/application/api-key-scope.js';
 import { IssueApiKeyService } from '../../auth/application/issue-api-key.service.js';
-import type { Principal } from '../../auth/application/principal.js';
-import { auditActorOf, canAddressMerchant } from './merchant-access.js';
+import {
+  auditActorOf,
+  type Principal,
+} from '../../auth/application/principal.js';
+import { canAddressMerchant } from './merchant-access.js';
 
 export interface IssueMerchantApiKeyCommand {
   readonly principal: Principal;

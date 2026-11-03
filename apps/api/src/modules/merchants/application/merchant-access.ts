@@ -1,5 +1,4 @@
 import type { Principal } from '../../auth/application/principal.js';
-import type { AuditEvent } from '../../audit/application/audit-event.js';
 
 /**
  * Whether the caller may learn that a merchant exists. A platform key may
@@ -18,11 +17,4 @@ export function canAddressMerchant(
     case 'MERCHANT':
       return principal.merchantId === merchantId;
   }
-}
-
-/** The actor recorded on the audit event of a request: the key that made it. */
-export function auditActorOf(
-  principal: Principal,
-): Pick<AuditEvent, 'actorType' | 'actorId'> {
-  return { actorType: 'API_KEY', actorId: principal.apiKeyId };
 }

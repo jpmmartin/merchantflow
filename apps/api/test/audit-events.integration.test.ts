@@ -102,7 +102,7 @@ describe('audit_events', () => {
       });
     });
 
-    it.each(['api_key', 'USER', 'PLATFORM_ADMIN', ''])(
+    it.each(['api_key', 'PLATFORM_ADMIN', ''])(
       'rejects the actor type %j',
       async (actorType) => {
         await expectDatabaseError(insert({ actor_type: actorType }), {

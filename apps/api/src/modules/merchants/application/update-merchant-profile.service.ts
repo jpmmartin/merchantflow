@@ -4,14 +4,17 @@ import type { Merchant } from '@merchantflow/domain';
 import { Inject, Injectable } from '@nestjs/common';
 import type { AuditMetadata } from '../../audit/application/audit-event.js';
 import { appendAuditEvent } from '../../audit/infrastructure/audit-event-queries.js';
-import type { Principal } from '../../auth/application/principal.js';
+import {
+  auditActorOf,
+  type Principal,
+} from '../../auth/application/principal.js';
 import { CLOCK, type Clock } from '../../clock/clock.js';
 import { DATABASE } from '../../database/database.module.js';
 import {
   findMerchantByIdForUpdate,
   updateMerchantProfile,
 } from '../infrastructure/merchant-queries.js';
-import { auditActorOf, canAddressMerchant } from './merchant-access.js';
+import { canAddressMerchant } from './merchant-access.js';
 import {
   MERCHANT_PROFILE_FIELDS,
   MERCHANT_PROFILE_FIELD_NAMES,

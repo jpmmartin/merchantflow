@@ -3,11 +3,13 @@ import type { Database } from '@merchantflow/database';
 import type { Merchant } from '@merchantflow/domain';
 import { Inject, Injectable } from '@nestjs/common';
 import { appendAuditEvent } from '../../audit/infrastructure/audit-event-queries.js';
-import type { Principal } from '../../auth/application/principal.js';
+import {
+  auditActorOf,
+  type Principal,
+} from '../../auth/application/principal.js';
 import { CLOCK, type Clock } from '../../clock/clock.js';
 import { DATABASE } from '../../database/database.module.js';
 import { insertMerchant } from '../infrastructure/merchant-queries.js';
-import { auditActorOf } from './merchant-access.js';
 
 /** The fields a merchant is created with. Its status is always `DRAFT`. */
 export interface NewMerchant {

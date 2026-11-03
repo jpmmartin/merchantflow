@@ -7,7 +7,9 @@ export const ERROR_CODES = [
   'VALIDATION_FAILED',
   'MALFORMED_JSON',
   'UNAUTHENTICATED',
+  'INVALID_CREDENTIALS',
   'INSUFFICIENT_ROLE',
+  'SESSION_REQUIRED',
   'NOT_FOUND',
   'MERCHANT_TRANSITION_NOT_ALLOWED',
   'MERCHANT_STATUS_CONFLICT',
@@ -59,9 +61,22 @@ export const ERROR_DEFINITIONS: Readonly<Record<ErrorCode, ErrorDefinition>> = {
     message: 'A valid API key is required.',
     headers: { 'WWW-Authenticate': 'Bearer' },
   },
+  // One answer for every failed sign-in: an unknown email, a wrong password,
+  // and a disabled user are not told apart.
+  INVALID_CREDENTIALS: {
+    status: 401,
+    message: 'The email or password is incorrect.',
+    headers: { 'WWW-Authenticate': 'Bearer' },
+  },
   INSUFFICIENT_ROLE: {
     status: 403,
     message: 'The API key role does not allow this operation.',
+  },
+  // Sign-out ends a user session; an API key is revoked through its own
+  // endpoint instead.
+  SESSION_REQUIRED: {
+    status: 403,
+    message: 'This operation applies only to a signed-in user session.',
   },
   NOT_FOUND: {
     status: 404,

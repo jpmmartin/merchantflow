@@ -6,7 +6,7 @@ export default defineConfig(
   globalIgnores(['**/dist/**', '**/coverage/**']),
   js.configs.recommended,
   {
-    files: ['**/*.ts'],
+    files: ['**/*.{ts,tsx}'],
     extends: [tseslint.configs.recommendedTypeChecked],
     languageOptions: {
       parserOptions: {
@@ -20,7 +20,7 @@ export default defineConfig(
     },
   },
   {
-    files: ['**/*.ts'],
+    files: ['**/*.{ts,tsx}'],
     rules: {
       // `@nestjs/config` is the only reader of the environment; code receives
       // validated values through `ConfigService`.

@@ -8,23 +8,24 @@ MerchantFlow is a payment orchestration reference platform built as a modular mo
 
 Today the repository contains the runnable foundation only:
 
-- a pnpm workspace with a NestJS API (`apps/api`) and a PostgreSQL access package (`packages/database`);
+- a pnpm workspace with a NestJS API (`apps/api`), a PostgreSQL access package (`packages/database`), and a web frontend (`apps/web`, React, Vite, and Bootstrap 5) with sign-in and sign-out (see Web frontend);
 - liveness and readiness endpoints, `GET /health/live` and `GET /health/ready`;
 - validated environment configuration that stops the API at startup when it is invalid;
 - structured JSON logs with a correlation ID on every request;
 - one error format for every failure, with a stable `code`, a safe message, and the correlation ID, plus request validation with Zod and an OpenAPI document served outside production (see API conventions);
 - a forward-only SQL migration runner (`pnpm db:migrate`);
-- database tables for merchants, API keys, an append-only audit trail, idempotency records, and payment intents, with the constraints enforced by PostgreSQL itself;
+- database tables for merchants, API keys, users, user sessions, an append-only audit trail, idempotency records, and payment intents, with the constraints enforced by PostgreSQL itself;
 - API keys: 256 bits of randomness, only a lookup identifier and a SHA-256 hash stored, and an audit event for each issuance and revocation;
-- request authentication: a global guard checks the `Authorization: Bearer <key>` header against the stored hash on every request, with deny-by-default routing and role checks (see Authentication);
+- request authentication: a global guard checks the `Authorization: Bearer <token>` header, an API key or a user session token, against the stored hash on every request, with deny-by-default routing and role checks (see Authentication);
+- user sign-in: `POST /api/v1/auth/login` with an email and a password (scrypt hashes only), `POST /api/v1/auth/logout`, and `GET /api/v1/auth/me`;
 - merchant endpoints under `/api/v1/merchants`: create, read, list with stable pagination, update, change status, and issue and revoke API keys, each with role rules, tenant isolation, and an audit event (see Merchant endpoints);
 - payment intent creation, `POST /api/v1/payment-intents`, with a required `Idempotency-Key` and protection against a second intent for the same merchant order (see Payment intents); nothing is charged;
 - payment intent retrieval, `GET /api/v1/payment-intents/{id}`, scoped to the merchant of the key (see Payment intents);
-- a development seed, `pnpm db:seed`, that creates the first platform administrator key (see Demonstration: two merchants, neither sees the other);
+- a development seed, `pnpm db:seed`, that creates the first platform administrator key and the platform administrator user (see Demonstration: two merchants, neither sees the other, and Web frontend);
 - linting, formatting, type checking, unit tests, and integration tests against a real PostgreSQL started with Testcontainers, including an HTTP concurrency suite (`tests/concurrency`) that sends 50 simultaneous requests to the listening API and checks that duplicates create one intent;
 - a GitHub Actions workflow that runs the same checks.
 
-Listing payment intents, confirming (charging) one, processors, the ledger, and every other business capability are planned and do not exist yet.
+Merchant users and every frontend screen other than sign-in and the signed-in home page, listing payment intents, confirming (charging) one, processors, the ledger, and every other business capability are planned and do not exist yet.
 
 ## Prerequisites
 
@@ -71,7 +72,7 @@ The setup has been verified on **Docker Desktop only**. The `dev` container moun
    docker compose down
    ```
 
-The API is published on `127.0.0.1:3000` and PostgreSQL on `127.0.0.1:5434`, both only on the local machine. If either port is taken, stop the process that uses it before starting the stack.
+The API is published on `127.0.0.1:3000`, the web frontend's development server on `127.0.0.1:5173`, and PostgreSQL on `127.0.0.1:5434`, all only on the local machine. If either port is taken, stop the process that uses it before starting the stack.
 
 ## Running commands
 
@@ -87,7 +88,8 @@ Run each of these as `docker compose exec dev pnpm <script>`.
 | Script             | What it does                                                                                            |
 | ------------------ | ------------------------------------------------------------------------------------------------------- |
 | `dev`              | Builds the database package and starts the API in watch mode on port 3000                               |
-| `build`            | Compiles every package                                                                                  |
+| `dev:web`          | Starts the Vite development server of the web frontend on port 5173 (see Web frontend)                  |
+| `build`            | Compiles every package, the web frontend included (type check and `vite build` into `apps/web/dist`)    |
 | `test`             | Runs the unit and API tests; they need no database                                                      |
 | `test:integration` | Runs the integration tests, the concurrency suite in `tests/concurrency` included; they start PostgreSQL containers through Testcontainers and need Docker |
 | `lint`             | Runs ESLint, including type-aware rules                                                                 |
@@ -95,9 +97,9 @@ Run each of these as `docker compose exec dev pnpm <script>`.
 | `format`           | Rewrites files with Prettier                                                                            |
 | `format:check`     | Fails if any file is not formatted with Prettier                                                        |
 | `db:migrate`       | Builds the project, applies pending SQL migrations to the database in `DATABASE_URL`, and prints status |
-| `db:seed`          | Builds the project and creates the development platform administrator key, printed once (see Demonstration) |
+| `db:seed`          | Builds the project, creates the development platform administrator key, and creates the platform administrator user; the key and the user's password are each printed once (see Demonstration and Web frontend) |
 
-`pnpm db:migrate` is safe to run repeatedly: applied migrations are recorded and never run twice, and concurrent runs are serialized by a database lock. The first run on an empty database creates the tables (`merchants`, `audit_events`, `api_keys`, `idempotency_records`, and `payment_intents`), and later runs report `Nothing is pending.` It empties `apps/api/dist` when it builds, which can interrupt a `pnpm dev` that is restarting at that moment.
+`pnpm db:migrate` is safe to run repeatedly: applied migrations are recorded and never run twice, and concurrent runs are serialized by a database lock. The first run on an empty database creates the tables (`merchants`, `audit_events`, `api_keys`, `idempotency_records`, `payment_intents`, `users`, and `user_sessions`), and later runs report `Nothing is pending.` It empties `apps/api/dist` when it builds, which can interrupt a `pnpm dev` that is restarting at that moment.
 
 ## API conventions
 
@@ -120,8 +122,10 @@ Every error response has the same body, and its `correlationId` equals the `X-Co
 | ------------------------ | ------ | ------------------------------------------------------------------------------ |
 | `VALIDATION_FAILED`      | 400    | Body, query, or route parameters do not match their schema; has `issues`       |
 | `MALFORMED_JSON`         | 400    | The body is not valid JSON                                                     |
-| `UNAUTHENTICATED`        | 401    | The API key is missing, malformed, unknown, wrong, or revoked                  |
-| `INSUFFICIENT_ROLE`      | 403    | The API key is valid but its role does not allow the operation                 |
+| `UNAUTHENTICATED`        | 401    | The API key or session token is missing, malformed, unknown, wrong, revoked, or expired, or the user is disabled |
+| `INVALID_CREDENTIALS`    | 401    | `POST /auth/login` failed: unknown email, wrong password, or disabled user, never told apart |
+| `INSUFFICIENT_ROLE`      | 403    | The API key or user is valid but its role does not allow the operation         |
+| `SESSION_REQUIRED`       | 403    | `POST /auth/logout` was called with an API key; it applies only to sessions    |
 | `NOT_FOUND`              | 404    | Unknown route, unsupported method, or a resource the caller cannot see         |
 | `MERCHANT_TRANSITION_NOT_ALLOWED` | 409 | The merchant's status cannot change to the requested one (including to itself) |
 | `MERCHANT_STATUS_CONFLICT` | 409  | Another request changed the merchant's status first; nothing was changed       |
@@ -322,17 +326,69 @@ docker compose exec dev pnpm db:seed
 
 Alternatively, `docker compose down --volumes` followed by the Quick start gives an empty database.
 
+## Web frontend
+
+`apps/web` is a React and TypeScript single-page app, built with Vite and styled with plain Bootstrap 5 CSS. It calls the API from the browser through one client module (`apps/web/src/api/client.ts`) that sends the session token as `Authorization: Bearer <token>`. Today it has the sign-in screen, a home page that shows the signed-in user and role from `GET /auth/me`, and sign-out.
+
+1. With the stack running and the dependencies installed (Quick start steps 1 and 2), apply the migrations and run the seed. The seed prints the administrator's email and a generated password **once**; store the password.
+
+   ```bash
+   docker compose exec dev pnpm db:migrate
+   docker compose exec dev pnpm db:seed
+   ```
+
+2. Start the API (Quick start step 3) and, in another terminal, the frontend:
+
+   ```bash
+   docker compose exec dev pnpm dev:web
+   ```
+
+3. Open <http://localhost:5173> and sign in with the seeded email (`admin@merchantflow.test` unless `SEED_ADMIN_EMAIL` says otherwise) and the printed password. The home page shows the user, the role, and no merchant. **Sign out** returns to the sign-in screen and revokes the session.
+
+Notes:
+
+- Any API error is shown with its `code` and correlation ID. A `401` on any call after sign-in clears the token and returns to the sign-in screen.
+- The token is kept in the tab's `sessionStorage`: it survives a reload, and closing the tab forgets it.
+- The browser calls the API at `VITE_API_BASE_URL` (default `http://localhost:3000/api/v1`), read by Vite from the repository-root `.env`.
+- The API answers browsers only from the origins in `CORS_ALLOWED_ORIGINS` (see Configuration). By default, outside production, those are `http://localhost:5173` and `http://127.0.0.1:5173`. To serve the frontend from another origin, list it there, for example `CORS_ALLOWED_ORIGINS=http://localhost:5173,https://demo.example.test`, and restart the API. Wildcards are not accepted.
+
+### Recover a lost administrator password
+
+A password that was not saved cannot be shown again, and the seed does not create a second platform user while one exists. In development, delete the user and its sessions and run the seed again. These statements are manual changes and write no audit event.
+
+```bash
+docker compose exec postgres psql -U merchantflow -d merchantflow \
+  -c "DELETE FROM user_sessions WHERE user_id IN (SELECT id FROM users WHERE merchant_id IS NULL)" \
+  -c "DELETE FROM users WHERE merchant_id IS NULL"
+docker compose exec dev pnpm db:seed
+```
+
 ## Authentication
 
-Every route requires an API key unless it is explicitly marked public. Send it as `Authorization: Bearer mfk_<lookup id>_<secret>`. The health probes and the OpenAPI document (outside production) need no key.
+Every route requires an API key or a user session token unless it is explicitly marked public. Send it as `Authorization: Bearer mfk_<lookup id>_<secret>` (API key) or `Authorization: Bearer mfs_<lookup id>_<secret>` (session token). The health probes, `POST /api/v1/auth/login`, and the OpenAPI document (outside production) need neither.
 
-- A missing header, another scheme, a malformed key, an unknown key, a wrong secret, and a revoked key all receive the same `401` with code `UNAUTHENTICATED` and a `WWW-Authenticate: Bearer` header, so a caller cannot tell which case occurred.
+- A missing header, another scheme, a malformed token, an unknown key or session, a wrong secret, a revoked key, a signed-out or expired session, and a session of a disabled user all receive the same `401` with code `UNAUTHENTICATED` and a `WWW-Authenticate: Bearer` header, so a caller cannot tell which case occurred.
 - A valid key whose role a route does not accept receives `403` with code `INSUFFICIENT_ROLE`.
 - Revocation is checked on every request and nothing is cached, so a revoked key stops working with its next request.
 - A route that declares neither the roles it accepts nor that it is public is denied, even to a valid key.
 - The merchant a request acts for comes only from the key, never from the path, query, body, or a header.
 - A key of a `DRAFT` or `SUSPENDED` merchant still authenticates; what each status allows is decided by the command that runs, not by the guard.
-- Logs record the key's row ID, role, and merchant ID, and never the key or any part of its secret.
+- Logs record the key's or the user's row ID, the role, and the merchant ID, and never a key, a token, a password, or any part of a secret.
+
+Users sign in with an email and a password:
+
+- `POST /api/v1/auth/login` with `{"email": "...", "password": "..."}` returns `{ token, expires_at, principal }`. The email is compared in lower case. An unknown email, a wrong password, and a disabled user all receive the same `401 INVALID_CREDENTIALS`, and each attempt costs the same scrypt comparison. The token is shown only in this response.
+- A session lasts 8 hours from sign-in and is never extended. Passwords are stored only as salted scrypt hashes; tokens only as SHA-256 hashes.
+- `POST /api/v1/auth/logout` revokes the session of the request (`204`); the token gets `401` afterwards. An API key gets `403 SESSION_REQUIRED` and stays valid.
+- `GET /api/v1/auth/me` returns the caller: a user with its ID, display name, email, role, and merchant, or an API key with its ID, role, and merchant.
+- A signed-in user acts with the same role and merchant rules as an API key, and its actions record `actor_type` `USER` and the user's ID in the audit trail. Sign-in and sign-out are audited as `USER_SESSION_CREATED` and `USER_SESSION_REVOKED`.
+
+```bash
+curl -sS -X POST http://127.0.0.1:3000/api/v1/auth/login \
+  -H 'Content-Type: application/json' -d '{"email":"admin@merchantflow.test","password":"<printed password>"}'
+curl -sS http://127.0.0.1:3000/api/v1/auth/me -H "Authorization: Bearer $TOKEN"
+curl -sS -i -X POST http://127.0.0.1:3000/api/v1/auth/logout -H "Authorization: Bearer $TOKEN"
+```
 
 ## Configuration
 
@@ -345,13 +401,17 @@ The API reads its configuration from environment variables and refuses to start,
 | `PORT`         | `3000`        | TCP port the API listens on inside the container                                   |
 | `LOG_LEVEL`    | `info`        | Minimum log level: `fatal`, `error`, `warn`, `info`, `debug`, `trace`, or `silent` |
 | `DATABASE_URL` | none          | PostgreSQL connection URI; required, and never logged                              |
+| `CORS_ALLOWED_ORIGINS` | `http://localhost:5173,http://127.0.0.1:5173` outside production; none in production | Comma-separated browser origins (`scheme://host[:port]`, no path, no wildcard) allowed to call the API |
+| `SEED_ADMIN_EMAIL` | `admin@merchantflow.test` | Email of the platform administrator user created by `pnpm db:seed` |
+| `VITE_API_BASE_URL` | `http://localhost:3000/api/v1` | API base URL the web frontend calls; read by Vite, not by the API |
 
 [`.env.example`](.env.example) is the reference for every variable. Docker Compose already sets `HOST` and `DATABASE_URL` for the `dev` container, so the quick start needs no `.env` file. To override a value, copy `.env.example` to `.env` in the repository root; `.env` is ignored by Git and must never be committed. The local database password defaults to a throwaway development value and can be changed with the `POSTGRES_PASSWORD` environment variable when running `docker compose`.
 
 ## Current limitations
 
 - A request the JSON body parser rejects (malformed JSON, for instance) receives the standard error but writes no access log line.
-- No rate limit or input size limit beyond the parser's default exists yet. Only payment intent creation takes an idempotency key: creating a merchant twice creates two merchants.
+- No rate limit or input size limit beyond the parser's default exists yet, sign-in included. There is no password reset, email verification, or multi-factor authentication.
+- Only the platform administrator user exists: merchant users are planned. `GET /auth/me` and `POST /auth/logout` accept only the `PLATFORM_ADMIN` role for now. Only payment intent creation takes an idempotency key: creating a merchant twice creates two merchants.
 - There is no endpoint to list payment intents yet, nor to confirm one; idempotency records are kept and never deleted (no purge exists). `payment_intents` rejects deletes and changes of an intent's amount, currency, reference, or merchant through triggers that a database superuser or the table owner can still disable.
 - The other business endpoints are the merchant endpoints: there is no endpoint to list the keys of a merchant (a key can be revoked by the `id` returned when it was issued), and no platform key can be issued through the API; the development seed is the only way to create one, and a lost platform key is replaced by revoking it in the database (see Recover a lost platform key). Payment confirmation, processors, ledger, and dashboard are planned.
 - The error responses of the health endpoints and of the unknown-route handler are not described in the OpenAPI document.

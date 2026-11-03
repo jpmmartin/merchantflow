@@ -44,7 +44,7 @@ export interface MerchantsTable {
 export interface AuditEventsTable {
   id: string;
   occurred_at: Date;
-  actor_type: 'API_KEY' | 'SYSTEM';
+  actor_type: 'API_KEY' | 'SYSTEM' | 'USER';
   actor_id: string;
   action: string;
   target_type: string;
@@ -127,6 +127,49 @@ export type PaymentIntentRow = Selectable<PaymentIntentsTable>;
 /** A `payment_intents` row as inserted, with every column at its insert type. */
 export type NewPaymentIntentRow = Insertable<PaymentIntentsTable>;
 
+/**
+ * Row of `users`. `id`, `role`, `merchant_id`, and `created_at` have no update
+ * type, matching the `users_restrict_update` trigger. `email` is stored in lower
+ * case, and `password_hash` is a scrypt hash in PHC string format, never the
+ * password. `role` lists the values of `users_role_scope_check`.
+ */
+export interface UsersTable {
+  id: ColumnType<string, string, never>;
+  email: string;
+  display_name: string;
+  role: ColumnType<
+    'PLATFORM_ADMIN' | 'MERCHANT_ADMIN' | 'MERCHANT_READ_ONLY',
+    'PLATFORM_ADMIN' | 'MERCHANT_ADMIN' | 'MERCHANT_READ_ONLY',
+    never
+  >;
+  merchant_id: ColumnType<string | null, string | null, never>;
+  password_hash: string;
+  enabled: boolean;
+  created_at: ColumnType<Date, Date, never>;
+  updated_at: Date;
+}
+
+/** A `users` row as selected, with every column at its read type. */
+export type UserRow = Selectable<UsersTable>;
+
+/**
+ * Row of `user_sessions`. Only `revoked_at` can be updated, matching the
+ * `user_sessions_restrict_update` trigger. `secret_hash` is the SHA-256 of the
+ * secret part of the token, never the token itself.
+ */
+export interface UserSessionsTable {
+  id: ColumnType<string, string, never>;
+  user_id: ColumnType<string, string, never>;
+  lookup_id: ColumnType<string, string, never>;
+  secret_hash: ColumnType<string, string, never>;
+  created_at: ColumnType<Date, Date, never>;
+  expires_at: ColumnType<Date, Date, never>;
+  revoked_at: Date | null;
+}
+
+/** A `user_sessions` row as selected, with every column at its read type. */
+export type UserSessionRow = Selectable<UserSessionsTable>;
+
 /** Table types of the database, keyed by table name. */
 export interface DatabaseSchema {
   merchants: MerchantsTable;
@@ -134,6 +177,8 @@ export interface DatabaseSchema {
   api_keys: ApiKeysTable;
   idempotency_records: IdempotencyRecordsTable;
   payment_intents: PaymentIntentsTable;
+  users: UsersTable;
+  user_sessions: UserSessionsTable;
 }
 
 /** The Kysely instance that every query and transaction goes through. */

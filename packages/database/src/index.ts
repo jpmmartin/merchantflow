@@ -30,6 +30,10 @@ export type {
   NewPaymentIntentRow,
   PaymentIntentRow,
   PaymentIntentsTable,
+  UserRow,
+  UserSessionRow,
+  UserSessionsTable,
+  UsersTable,
 } from './schema.js';
 export {
   MIGRATION_DATABASE_SETTINGS,

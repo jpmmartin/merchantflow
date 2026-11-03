@@ -49,7 +49,7 @@ export class AuthenticateApiKeyService {
     }
     return {
       ok: true,
-      principal: { ...apiKey.scope, apiKeyId: apiKey.id },
+      principal: { ...apiKey.scope, source: 'API_KEY', apiKeyId: apiKey.id },
     };
   }
 }

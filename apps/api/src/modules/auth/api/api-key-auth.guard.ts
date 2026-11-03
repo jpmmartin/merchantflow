@@ -7,7 +7,9 @@ import { Reflector } from '@nestjs/core';
 import { PinoLogger } from 'nestjs-pino';
 import { ApiException } from '../../errors/api/api-exception.js';
 import { AuthenticateApiKeyService } from '../application/authenticate-api-key.service.js';
+import { AuthenticateSessionService } from '../application/authenticate-session.service.js';
 import type { Principal } from '../application/principal.js';
+import { isSessionToken } from '../application/session-token.js';
 import { setRequestPrincipal } from './request-principal.js';
 import { Public, Roles } from './route-access.js';
 
@@ -46,14 +48,18 @@ export function readBearerToken(
  *   whatever the role, and the mistake is logged. An anonymous caller still
  *   sees only the 401 every unauthenticated request gets.
  *
- * Authentication failures all raise the same `UNAUTHENTICATED` exception.
- * The decision depends only on the key, never on a merchant ID in the request.
+ * The bearer token is either an API key (`mfk_`) or a user session token
+ * (`mfs_`), told apart by its prefix; both yield the same kind of principal.
+ * Authentication failures all raise the same `UNAUTHENTICATED` exception,
+ * whichever kind the token claimed to be. The decision depends only on the
+ * stored key or session and its user, never on a merchant ID in the request.
  */
 @Injectable()
 export class ApiKeyAuthGuard implements CanActivate {
   constructor(
     private readonly reflector: Reflector,
     private readonly authenticate: AuthenticateApiKeyService,
+    private readonly authenticateSession: AuthenticateSessionService,
     private readonly logger: PinoLogger,
   ) {
     this.logger.setContext(ApiKeyAuthGuard.name);
@@ -70,7 +76,9 @@ export class ApiKeyAuthGuard implements CanActivate {
     if (token === undefined) {
       throw new ApiException('UNAUTHENTICATED');
     }
-    const result = await this.authenticate.execute(token);
+    const result = isSessionToken(token)
+      ? await this.authenticateSession.execute(token)
+      : await this.authenticate.execute(token);
     if (!result.ok) {
       throw new ApiException(result.code);
     }
@@ -98,17 +106,21 @@ export class ApiKeyAuthGuard implements CanActivate {
 }
 
 /**
- * The identifiers that go on every log line of an authenticated request:
- * the key row's id, its role, and the merchant of a merchant key. The key and
- * its lookup id are never logged.
+ * The identifiers that go on every log line of an authenticated request: the
+ * key row's id or the user's id, the role, and the merchant of a merchant
+ * principal. A key, a token, and their lookup ids are never logged.
  */
 function describeForLog(principal: Principal): Record<string, string> {
+  const credential =
+    principal.source === 'API_KEY'
+      ? { apiKeyId: principal.apiKeyId }
+      : { userId: principal.userId };
   switch (principal.kind) {
     case 'PLATFORM':
-      return { apiKeyId: principal.apiKeyId, role: principal.role };
+      return { ...credential, role: principal.role };
     case 'MERCHANT':
       return {
-        apiKeyId: principal.apiKeyId,
+        ...credential,
         role: principal.role,
         merchantId: principal.merchantId,
       };
