@@ -57,6 +57,16 @@ function mountOpenApi(app: INestApplication): void {
     .setTitle('MerchantFlow API')
     .setDescription('Payment orchestration reference platform (sandbox only).')
     .setVersion('1')
+    .addBearerAuth(
+      {
+        type: 'http',
+        scheme: 'bearer',
+        bearerFormat: 'API key',
+        description:
+          'API key issued by POST /merchants/{id}/api-keys, sent as Authorization: Bearer <key>.',
+      },
+      'bearer',
+    )
     .build();
   SwaggerModule.setup(
     OPENAPI_UI_PATH,

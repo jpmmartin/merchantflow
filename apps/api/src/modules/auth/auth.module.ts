@@ -4,6 +4,7 @@ import { ClockModule } from '../clock/clock.module.js';
 import { DatabaseModule } from '../database/database.module.js';
 import { ApiKeyAuthGuard } from './api/api-key-auth.guard.js';
 import { AuthenticateApiKeyService } from './application/authenticate-api-key.service.js';
+import { FindApiKeyService } from './application/find-api-key.service.js';
 import { IssueApiKeyService } from './application/issue-api-key.service.js';
 import { RevokeApiKeyService } from './application/revoke-api-key.service.js';
 
@@ -18,8 +19,9 @@ import { RevokeApiKeyService } from './application/revoke-api-key.service.js';
     IssueApiKeyService,
     RevokeApiKeyService,
     AuthenticateApiKeyService,
+    FindApiKeyService,
     { provide: APP_GUARD, useClass: ApiKeyAuthGuard },
   ],
-  exports: [IssueApiKeyService, RevokeApiKeyService],
+  exports: [IssueApiKeyService, RevokeApiKeyService, FindApiKeyService],
 })
 export class AuthModule {}

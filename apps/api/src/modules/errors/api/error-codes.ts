@@ -9,6 +9,8 @@ export const ERROR_CODES = [
   'UNAUTHENTICATED',
   'INSUFFICIENT_ROLE',
   'NOT_FOUND',
+  'MERCHANT_TRANSITION_NOT_ALLOWED',
+  'MERCHANT_STATUS_CONFLICT',
   'PAYLOAD_TOO_LARGE',
   'UNSUPPORTED_MEDIA_TYPE',
   'REQUEST_REJECTED',
@@ -55,6 +57,18 @@ export const ERROR_DEFINITIONS: Readonly<Record<ErrorCode, ErrorDefinition>> = {
   NOT_FOUND: {
     status: 404,
     message: 'The requested resource was not found.',
+  },
+  // The merchant's current status does not allow the requested one, including
+  // asking for the status it already has.
+  MERCHANT_TRANSITION_NOT_ALLOWED: {
+    status: 409,
+    message: 'The merchant status cannot change to the requested status.',
+  },
+  // Another request changed the merchant's status after this one read it, so
+  // nothing was changed. Reading the merchant again shows the new status.
+  MERCHANT_STATUS_CONFLICT: {
+    status: 409,
+    message: 'The merchant status was changed by another request.',
   },
   PAYLOAD_TOO_LARGE: {
     status: 413,

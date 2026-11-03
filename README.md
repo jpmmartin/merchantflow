@@ -14,13 +14,14 @@ Today the repository contains the runnable foundation only:
 - structured JSON logs with a correlation ID on every request;
 - one error format for every failure, with a stable `code`, a safe message, and the correlation ID, plus request validation with Zod and an OpenAPI document served outside production (see API conventions);
 - a forward-only SQL migration runner (`pnpm db:migrate`);
-- database tables for merchants and an append-only audit trail, with the constraints enforced by PostgreSQL itself (storage only: there are no merchant endpoints yet);
-- API key issuance and revocation inside the API code: keys carry 256 bits of randomness, only a lookup identifier and a SHA-256 hash are stored, and each issuance or revocation writes an audit event (no endpoint issues or revokes keys yet);
-- request authentication: a global guard checks the `Authorization: Bearer <key>` header against the stored hash on every request, with deny-by-default routing and role checks (see Authentication). No business endpoint exists yet, so only the tests exercise it;
+- database tables for merchants, API keys, and an append-only audit trail, with the constraints enforced by PostgreSQL itself;
+- API keys: 256 bits of randomness, only a lookup identifier and a SHA-256 hash stored, and an audit event for each issuance and revocation;
+- request authentication: a global guard checks the `Authorization: Bearer <key>` header against the stored hash on every request, with deny-by-default routing and role checks (see Authentication);
+- merchant endpoints under `/api/v1/merchants`: create, read, list with stable pagination, update, change status, and issue and revoke API keys, each with role rules, tenant isolation, and an audit event (see Merchant endpoints);
 - linting, formatting, type checking, unit tests, and integration tests against a real PostgreSQL started with Testcontainers;
 - a GitHub Actions workflow that runs the same checks.
 
-Merchants, payments, and every other business capability are planned and do not exist yet.
+Payments, processors, the ledger, and every other business capability are planned and do not exist yet.
 
 ## Prerequisites
 
@@ -96,7 +97,7 @@ Run each of these as `docker compose exec dev pnpm <script>`.
 
 ## API conventions
 
-Business endpoints will live under `/api/v1`; the health endpoints keep their paths, `/health/live` and `/health/ready`. No business endpoint exists yet.
+Business endpoints live under `/api/v1`; the health endpoints keep their paths, `/health/live` and `/health/ready`. The only business endpoints today are the merchant endpoints (see Merchant endpoints).
 
 Every error response has the same body, and its `correlationId` equals the `X-Correlation-Id` response header. `message` is fixed text for each `code`; it never contains parser, framework, or internal details, and a validation error lists the field path and the rule code of each invalid field, never the received value.
 
@@ -117,8 +118,10 @@ Every error response has the same body, and its `correlationId` equals the `X-Co
 | `MALFORMED_JSON`         | 400    | The body is not valid JSON                                                     |
 | `UNAUTHENTICATED`        | 401    | The API key is missing, malformed, unknown, wrong, or revoked                  |
 | `INSUFFICIENT_ROLE`      | 403    | The API key is valid but its role does not allow the operation                 |
+| `NOT_FOUND`              | 404    | Unknown route, unsupported method, or a resource the caller cannot see         |
+| `MERCHANT_TRANSITION_NOT_ALLOWED` | 409 | The merchant's status cannot change to the requested one (including to itself) |
+| `MERCHANT_STATUS_CONFLICT` | 409  | Another request changed the merchant's status first; nothing was changed       |
 | `REQUEST_REJECTED`       | 4xx    | Any other client error, with its own status                                    |
-| `NOT_FOUND`              | 404    | Unknown route, unsupported method, or (later) a resource the caller cannot see |
 | `PAYLOAD_TOO_LARGE`      | 413    | The body exceeds the parser's default limit                                    |
 | `UNSUPPORTED_MEDIA_TYPE` | 415    | The body encoding is not supported                                             |
 | `INTERNAL_ERROR`         | 500    | An unexpected failure; the cause is only in the server log                     |
@@ -126,6 +129,30 @@ Every error response has the same body, and its `correlationId` equals the `X-Co
 The `/health/ready` answer is the exception: its `503` body stays `{"status":"unavailable"}`, because probes read the status.
 
 Outside production (`NODE_ENV` other than `production`) the API serves its OpenAPI document at `GET /docs/openapi.json` and an interactive UI at `GET /docs`. In production neither exists.
+
+## Merchant endpoints
+
+All of them need an API key (see Authentication) and use `snake_case` fields. Merchants start in `DRAFT`; the allowed status changes are `DRAFT` to `ACTIVE`, `ACTIVE` to `SUSPENDED`, and `SUSPENDED` to `ACTIVE`.
+
+| Endpoint                                                | `PLATFORM_ADMIN` | `MERCHANT_ADMIN`            | `MERCHANT_READ_ONLY` |
+| ------------------------------------------------------- | ---------------- | --------------------------- | -------------------- |
+| `POST /api/v1/merchants`                                | creates          | 403                         | 403                  |
+| `GET /api/v1/merchants`                                 | lists all        | lists its own merchant      | lists its own        |
+| `GET /api/v1/merchants/{id}`                            | any merchant     | its own merchant            | its own merchant     |
+| `PATCH /api/v1/merchants/{id}`                          | five profile fields | `display_name`, `industry` of its own | 403         |
+| `POST /api/v1/merchants/{id}/status`                    | changes status   | 403                         | 403                  |
+| `POST /api/v1/merchants/{id}/api-keys`                  | issues a key     | 403                         | 403                  |
+| `POST /api/v1/merchants/{id}/api-keys/{apiKeyId}/revoke` | revokes a key   | 403                         | 403                  |
+
+- A merchant key that names any merchant other than its own gets `404 NOT_FOUND` before any role check, and the answer is the same as for a merchant that does not exist. For its own merchant, a forbidden operation, field, or status change is `403 INSUFFICIENT_ROLE` and nothing changes, also when the merchant is suspended. A merchant administrator may still edit `display_name` and `industry` while its merchant is suspended.
+- A platform administrator updates `legal_name`, `display_name`, `business_type`, `industry`, and `country_code`. `default_currency` is fixed when the merchant is created, and the status changes only through `POST .../status`.
+- Request bodies and query strings are strict: an unknown field is a `400 VALIDATION_FAILED`.
+- Creating a merchant does not issue a key. `POST .../api-keys` with `{"role": "MERCHANT_ADMIN"}` or `{"role": "MERCHANT_READ_ONLY"}` returns the key once, with `Cache-Control: no-store`; it is stored only as a hash and cannot be retrieved again. A revoked key stops working with its next request.
+- `GET /api/v1/merchants?limit=20&cursor=...` returns `{"data": [...], "next_cursor": "..."}` ordered by creation time and then id. `limit` is 1 to 100 (default 20). Pass `next_cursor` back unchanged as `cursor`; it is `null` on the last page. An invalid cursor is a `400`. A walk over the pages never repeats a merchant, and never skips one that existed when it began.
+- Every change writes one audit event in the same transaction, naming the API key that made it and the request's correlation ID. Updates record the previous and new values of the changed fields.
+- The OpenAPI document (outside production) lists each endpoint with its roles, schemas, error responses, and the `bearer` security scheme.
+
+The first platform administrator key cannot be created through the API. The development seed that creates it is planned (T-01-08); until then it is issued from code, as the integration tests do.
 
 ## Authentication
 
@@ -156,8 +183,10 @@ The API reads its configuration from environment variables and refuses to start,
 ## Current limitations
 
 - A request the JSON body parser rejects (malformed JSON, for instance) receives the standard error but writes no access log line.
-- The OpenAPI document does not describe error responses yet, and no rate limit or input size limit beyond the parser's default exists.
-- Only the foundation, the merchant, audit, and API key tables, and the key issuance and revocation code exist: no merchant endpoints, no endpoint to issue or revoke keys, payments, processors, ledger, or dashboard. These are planned.
+- No rate limit, idempotency key, or input size limit beyond the parser's default exists yet. Creating a merchant twice creates two merchants.
+- The only business endpoints are the merchant endpoints: there is no endpoint to list the keys of a merchant (a key can be revoked by the `id` returned when it was issued), and no platform key can be issued through the API. Payments, processors, ledger, and dashboard are planned.
+- The error responses of the health endpoints and of the unknown-route handler are not described in the OpenAPI document.
+- A merchant created or changed by a transaction that commits late can be missed by a list walk already past its position; the next walk shows it.
 - `api_keys` accepts only the `PLATFORM_ADMIN`, `MERCHANT_ADMIN`, and `MERCHANT_READ_ONLY` roles; rows can be revoked once and never removed or reactivated, through triggers that a database superuser or the table owner can still disable.
 - `audit_events` rejects updates, deletes, and truncation through a trigger, which a database superuser or the table owner can still disable. Audit metadata must never hold secrets or payment credentials.
 - The setup is verified on Docker Desktop only (see Prerequisites).

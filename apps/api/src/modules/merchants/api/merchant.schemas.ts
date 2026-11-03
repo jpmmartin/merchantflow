@@ -1,0 +1,179 @@
+import { MERCHANT_STATUSES } from '@merchantflow/domain';
+import { z } from 'zod';
+import { MERCHANT_API_KEY_ROLES } from '../../auth/application/api-key-scope.js';
+import { decodeMerchantCursor } from './merchant-cursor.js';
+
+/** Largest page a list request may ask for. */
+export const MAX_PAGE_SIZE = 100;
+
+/** Page size when the request gives none. */
+export const DEFAULT_PAGE_SIZE = 20;
+
+// The lengths and formats match the columns and check constraints of
+// `merchants` (AD-44), so PostgreSQL never has to be the first to refuse a
+// value. Text is trimmed and must keep a character.
+const text = (maxLength: number) => z.string().trim().min(1).max(maxLength);
+const legalName = text(200);
+const displayName = text(100);
+const businessType = text(50);
+const industry = text(100);
+const countryCode = z.string().regex(/^[A-Z]{2}$/);
+const currencyCode = z.string().regex(/^[A-Z]{3}$/);
+
+export const merchantIdParamSchema = z.uuid();
+export const apiKeyIdParamSchema = z.uuid();
+
+export const createMerchantSchema = z.strictObject({
+  legal_name: legalName.describe('Legal name of the business.'),
+  display_name: displayName.describe('Name shown to customers.'),
+  business_type: businessType.describe('Legal form, for example LLC.'),
+  industry: industry.describe('Industry the merchant operates in.'),
+  country_code: countryCode.describe('ISO 3166-1 alpha-2 country code.'),
+  default_currency: currencyCode.describe(
+    'ISO 4217 currency code. It cannot be changed afterwards.',
+  ),
+});
+
+export type CreateMerchantBody = z.infer<typeof createMerchantSchema>;
+
+const FIXED_FIELD_NOTE =
+  'Never accepted here; naming it is refused (403 for a merchant key, 400 for a platform key).';
+
+/**
+ * The fields of a profile update. `status` and `default_currency` are named
+ * so that a request that tries to change them is answered by role first (a
+ * merchant key gets 403) and not by an unknown-field error; no role can
+ * change them through this endpoint.
+ */
+export const updateMerchantSchema = z
+  .strictObject({
+    legal_name: legalName
+      .optional()
+      .describe('Platform administrator only: legal identity.'),
+    display_name: displayName
+      .optional()
+      .describe('Platform administrator or the merchant administrator.'),
+    business_type: businessType
+      .optional()
+      .describe('Platform administrator only: legal identity.'),
+    industry: industry
+      .optional()
+      .describe('Platform administrator or the merchant administrator.'),
+    country_code: countryCode
+      .optional()
+      .describe('Platform administrator only: legal identity.'),
+    status: z
+      .string()
+      .optional()
+      .describe(`Use POST /merchants/{id}/status. ${FIXED_FIELD_NOTE}`),
+    default_currency: z
+      .string()
+      .optional()
+      .describe(`Fixed at creation. ${FIXED_FIELD_NOTE}`),
+  })
+  .refine((body) => Object.values(body).some((value) => value !== undefined), {
+    message: 'At least one field is required.',
+  });
+
+export type UpdateMerchantBody = z.infer<typeof updateMerchantSchema>;
+
+export const changeMerchantStatusSchema = z.strictObject({
+  status: z
+    .enum(MERCHANT_STATUSES)
+    .describe(
+      'Requested status. Allowed: DRAFT to ACTIVE, ACTIVE to SUSPENDED, SUSPENDED to ACTIVE.',
+    ),
+});
+
+export type ChangeMerchantStatusBody = z.infer<
+  typeof changeMerchantStatusSchema
+>;
+
+export const issueApiKeySchema = z.strictObject({
+  role: z.enum(MERCHANT_API_KEY_ROLES).describe('Role of the new key.'),
+});
+
+export type IssueApiKeyBody = z.infer<typeof issueApiKeySchema>;
+
+export const listMerchantsQuerySchema = z.strictObject({
+  limit: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(MAX_PAGE_SIZE)
+    .default(DEFAULT_PAGE_SIZE)
+    .describe('Page size.'),
+  cursor: z
+    .string()
+    .min(1)
+    .max(200)
+    .transform((value, context) => {
+      const position = decodeMerchantCursor(value);
+      if (position === undefined) {
+        context.issues.push({
+          code: 'custom',
+          input: value,
+          message: 'Invalid cursor.',
+        });
+        return z.NEVER;
+      }
+      return position;
+    })
+    .optional()
+    .describe('The next_cursor of the previous page, unchanged.'),
+});
+
+export type ListMerchantsQuery = z.infer<typeof listMerchantsQuerySchema>;
+
+const timestamp = z.iso.datetime();
+
+export const merchantResponseSchema = z.object({
+  id: z.uuid(),
+  legal_name: z.string(),
+  display_name: z.string(),
+  business_type: z.string(),
+  industry: z.string(),
+  country_code: z.string(),
+  default_currency: z.string(),
+  status: z.enum(MERCHANT_STATUSES),
+  created_at: timestamp,
+  updated_at: timestamp,
+});
+
+export type MerchantResponse = z.infer<typeof merchantResponseSchema>;
+
+export const merchantListResponseSchema = z.object({
+  data: z.array(merchantResponseSchema),
+  next_cursor: z
+    .string()
+    .nullable()
+    .describe('Pass it as cursor for the next page; null on the last page.'),
+});
+
+export type MerchantListResponse = z.infer<typeof merchantListResponseSchema>;
+
+export const issuedApiKeyResponseSchema = z.object({
+  id: z.uuid().describe('Identifier of the key, used to revoke it.'),
+  merchant_id: z.uuid(),
+  role: z.enum(MERCHANT_API_KEY_ROLES),
+  created_at: timestamp,
+  key: z
+    .string()
+    .describe(
+      'The API key. It is shown only in this response and cannot be retrieved again.',
+    ),
+});
+
+export type IssuedApiKeyResponse = z.infer<typeof issuedApiKeyResponseSchema>;
+
+export const revokedApiKeyResponseSchema = z.object({
+  id: z.uuid(),
+  merchant_id: z.uuid(),
+  role: z.enum(MERCHANT_API_KEY_ROLES),
+  created_at: timestamp,
+  revoked_at: timestamp.describe(
+    'When the key was revoked; the earlier time when it already was.',
+  ),
+});
+
+export type RevokedApiKeyResponse = z.infer<typeof revokedApiKeyResponseSchema>;
