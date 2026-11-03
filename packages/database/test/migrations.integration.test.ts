@@ -115,7 +115,9 @@ describe('SQL migrations against PostgreSQL', () => {
       const url = await createTestDatabase();
       const database = connect(url);
 
-      const result = await runMigrations(database);
+      const result = await runMigrations(database, {
+        directory: fixture('none'),
+      });
 
       expect(result).toEqual({ status: 'completed', applied: [] });
       expect(await tablesOf(url)).toEqual([

@@ -63,7 +63,7 @@ describe('the db:migrate command', () => {
   it('succeeds and reports nothing pending when there are no migrations', async () => {
     const postgres = await startPostgres(CREDENTIALS);
     try {
-      const result = await run(postgres.getConnectionUri());
+      const result = await run(postgres.getConnectionUri(), fixture('none'));
 
       expect(result.code).toBe(0);
       expect(result.stdout).toBe(

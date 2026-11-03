@@ -5,7 +5,14 @@ export {
 } from './create-database.js';
 export { describeDatabaseFailure } from './describe-failure.js';
 export { pingDatabase } from './ping.js';
-export type { Database, DatabaseSchema } from './schema.js';
+export type {
+  AuditEventsTable,
+  Database,
+  DatabaseSchema,
+  JsonObject,
+  JsonValue,
+  MerchantsTable,
+} from './schema.js';
 export {
   MIGRATION_DATABASE_SETTINGS,
   createMigrationDatabase,

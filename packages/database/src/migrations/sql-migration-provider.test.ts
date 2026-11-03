@@ -59,7 +59,7 @@ describe('SqlMigrationProvider', () => {
     ).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
-  it('finds the project migrations directory beside src, with no migration yet', async () => {
+  it('finds the project migrations directory beside src and loads its first migration', async () => {
     const migrations = await new SqlMigrationProvider(
       MIGRATIONS_DIRECTORY,
     ).getMigrations();
@@ -67,6 +67,8 @@ describe('SqlMigrationProvider', () => {
     expect(
       MIGRATIONS_DIRECTORY.endsWith('/packages/database/migrations/'),
     ).toBe(true);
-    expect(migrations).toEqual({});
+    expect(Object.keys(migrations)).toContain(
+      '20261102233000_create_merchants_and_audit_events',
+    );
   });
 });

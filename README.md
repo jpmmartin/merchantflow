@@ -13,6 +13,7 @@ Today the repository contains the runnable foundation only:
 - validated environment configuration that stops the API at startup when it is invalid;
 - structured JSON logs with a correlation ID on every request;
 - a forward-only SQL migration runner (`pnpm db:migrate`);
+- database tables for merchants and an append-only audit trail, with the constraints enforced by PostgreSQL itself (storage only: there are no merchant endpoints yet);
 - linting, formatting, type checking, unit tests, and integration tests against a real PostgreSQL started with Testcontainers;
 - a GitHub Actions workflow that runs the same checks.
 
@@ -88,7 +89,7 @@ Run each of these as `docker compose exec dev pnpm <script>`.
 | `format:check`     | Fails if any file is not formatted with Prettier                                                        |
 | `db:migrate`       | Builds the project, applies pending SQL migrations to the database in `DATABASE_URL`, and prints status |
 
-`pnpm db:migrate` is safe to run repeatedly: applied migrations are recorded and never run twice, and concurrent runs are serialized by a database lock. The repository contains no business migration yet, so it currently reports `Nothing is pending.` It empties `apps/api/dist` when it builds, which can interrupt a `pnpm dev` that is restarting at that moment.
+`pnpm db:migrate` is safe to run repeatedly: applied migrations are recorded and never run twice, and concurrent runs are serialized by a database lock. The first run on an empty database creates the `merchants` and `audit_events` tables, and later runs report `Nothing is pending.` It empties `apps/api/dist` when it builds, which can interrupt a `pnpm dev` that is restarting at that moment.
 
 ## Configuration
 
@@ -106,7 +107,8 @@ The API reads its configuration from environment variables and refuses to start,
 
 ## Current limitations
 
-- Only the foundation exists: no merchants, authentication, payments, processors, ledger, or dashboard. These are planned.
+- Only the foundation and the merchant and audit tables exist: no merchant or authentication endpoints, payments, processors, ledger, or dashboard. These are planned.
+- `audit_events` rejects updates, deletes, and truncation through a trigger, which a database superuser or the table owner can still disable. Audit metadata must never hold secrets or payment credentials.
 - The setup is verified on Docker Desktop only (see Prerequisites).
 - The GitHub Actions workflow has not run on a hosted runner yet.
 - There is no production build, deployment configuration, or container image for running the API outside development.
