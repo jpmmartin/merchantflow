@@ -63,7 +63,11 @@ const COMMAND_ROUTES = TENANT_ROUTES.filter(
 
 /** A name for an entry; routes that repeat are told apart by their body. */
 function labelOf(entry: TenantRoute): string {
-  const body = entry.request({ merchantId: 'x', apiKeyId: 'y' }).body;
+  const body = entry.request({
+    merchantId: 'x',
+    apiKeyId: 'y',
+    paymentIntentId: 'z',
+  }).body;
   return body === undefined
     ? entry.route
     : `${entry.route} {${Object.keys(body).join(', ')}}`;
@@ -261,7 +265,7 @@ describe('tenant isolation', () => {
 
   describe('routes that the valid requests reach', () => {
     it.each(RESOURCE_ROUTES.map((entry) => [labelOf(entry), entry] as const))(
-      'accepts %s from the platform key and answers 404 for a missing merchant',
+      'gives the platform key the declared answers for %s with an existing and a missing target',
       async (_label, entry) => {
         // Fresh tenants: the request may change what it addresses.
         const fresh = await createTenants(api);
@@ -310,6 +314,7 @@ describe('tenant isolation', () => {
           expect(errorOf(response).code).toBe('NOT_FOUND');
           expect(observable(response)).toEqual(observable(missing));
           expect(response.text).not.toContain(target.merchant.id);
+          expect(response.text).not.toContain(target.resources.paymentIntentId);
           expectUnchanged(
             before,
             await snapshotDatabase(api),
@@ -470,7 +475,7 @@ describe('tenant isolation', () => {
             tenants.platform.key,
             entry.route,
             entry.request({
-              merchantId: tenants.a.merchant.id,
+              ...tenants.a.resources,
               apiKeyId: tenants.platform.id,
             }),
           );
@@ -727,6 +732,7 @@ describe('tenant isolation', () => {
           'GET /merchants/:id',
           'POST /merchants/:id/api-keys/:apiKeyId/revoke',
           'POST /payment-intents',
+          'GET /payment-intents/:id',
         ]),
       );
     });

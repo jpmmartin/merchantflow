@@ -10,6 +10,8 @@ export interface TenantResources {
   readonly merchantId: string;
   /** Identifier of a key row that belongs to the merchant. */
   readonly apiKeyId: string;
+  /** Identifier of a payment intent that belongs to the merchant. */
+  readonly paymentIntentId: string;
 }
 
 /** A request a route entry builds for a set of resources. */
@@ -165,6 +167,15 @@ export const TENANT_ROUTES: readonly TenantRoute[] = [
     }),
     allowedRoles: ['MERCHANT_ADMIN'],
     created: 201,
+  },
+  {
+    // The path names an intent and no merchant, and the platform key is
+    // refused for every id, so it gets 403 whether or not the intent exists.
+    kind: 'resource',
+    route: 'GET /payment-intents/:id',
+    request: (r) => ({ path: `/payment-intents/${r.paymentIntentId}` }),
+    platformExisting: 403,
+    platformMissing: 403,
   },
 ];
 

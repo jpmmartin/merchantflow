@@ -172,3 +172,86 @@ describe('OpenAPI document of POST /payment-intents', () => {
     }
   });
 });
+
+describe('OpenAPI document of GET /payment-intents/{id}', () => {
+  let app: INestApplication;
+  let server: Server;
+  let operation: Operation;
+
+  beforeAll(async () => {
+    ({ app, server } = await startApp(UNREACHABLE_DATABASE_URL));
+    const response = await request(server).get('/docs/openapi.json');
+    const document = response.body as OpenApiDocument;
+    const found = document.paths['/api/v1/payment-intents/{id}']?.['get'];
+    if (found === undefined) {
+      throw new Error('GET /payment-intents/{id} is missing');
+    }
+    operation = found;
+  });
+
+  afterAll(async () => {
+    await app.close();
+  });
+
+  it('requires the Bearer scheme and names the roles', () => {
+    expect(operation.security).toEqual([{ bearer: [] }]);
+    expect(operation.summary).toBeTruthy();
+    expect(operation.description).toContain('MERCHANT_ADMIN');
+    expect(operation.description).toContain('MERCHANT_READ_ONLY');
+    expect(operation.description).toContain('PLATFORM_ADMIN');
+  });
+
+  it('documents the id as a required path parameter', () => {
+    const id = operation.parameters?.find(
+      (parameter) => parameter.name === 'id',
+    );
+
+    expect(id).toMatchObject({ in: 'path', required: true });
+    expect(id?.schema?.type).toBe('string');
+  });
+
+  it('documents the 200 body like the create response and every error with the shared shape', () => {
+    expect(Object.keys(operation.responses).sort()).toEqual([
+      '200',
+      '400',
+      '401',
+      '403',
+      '404',
+      '500',
+    ]);
+    const ok = operation.responses['200']?.content?.['application/json'].schema;
+    expect(Object.keys(ok?.properties ?? {})).toEqual([
+      'id',
+      'merchant_id',
+      'amount_minor',
+      'currency',
+      'merchant_reference',
+      'status',
+      'created_at',
+      'updated_at',
+    ]);
+    expect(ok?.properties?.['amount_minor']?.type).toBe('string');
+
+    for (const status of ['400', '401', '403', '404', '500']) {
+      const schema =
+        operation.responses[status]?.content?.['application/json'].schema;
+      expect(schema?.properties?.['error']?.properties?.['code']?.enum).toEqual(
+        [...ERROR_CODES],
+      );
+    }
+  });
+
+  it.each([
+    ['400', ['VALIDATION_FAILED']],
+    ['401', ['UNAUTHENTICATED']],
+    ['403', ['INSUFFICIENT_ROLE']],
+    ['404', ['NOT_FOUND']],
+    ['500', ['INTERNAL_ERROR']],
+  ])('names the codes of %s', (status, codes) => {
+    const description = operation.responses[status]?.description ?? '';
+    for (const code of codes) {
+      expect(description).toContain(code);
+      expect(ERROR_CODES).toContain(code);
+    }
+  });
+});

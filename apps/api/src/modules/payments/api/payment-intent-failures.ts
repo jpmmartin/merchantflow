@@ -6,6 +6,7 @@ import {
 import { ApiException } from '../../errors/api/api-exception.js';
 import type { ValidationIssue } from '../../errors/api/error-response.js';
 import type { CreatePaymentIntentFailureCode } from '../application/create-payment-intent.service.js';
+import type { GetPaymentIntentResult } from '../application/get-payment-intent.service.js';
 import type { CreatePaymentIntentBody } from './payment-intent.schemas.js';
 
 /** The exception for a refused create request. */
@@ -27,6 +28,18 @@ export function toApiException(
       return new ApiException('IDEMPOTENCY_KEY_REUSED');
     case 'LOCK_TIMEOUT':
       return new ApiException('OPERATION_TIMEOUT');
+  }
+}
+
+/** The exception for a refused read request. */
+export function toGetApiException(
+  code: Extract<GetPaymentIntentResult, { ok: false }>['code'],
+): ApiException {
+  switch (code) {
+    case 'FORBIDDEN':
+      return new ApiException('INSUFFICIENT_ROLE');
+    case 'NOT_FOUND':
+      return new ApiException('NOT_FOUND');
   }
 }
 

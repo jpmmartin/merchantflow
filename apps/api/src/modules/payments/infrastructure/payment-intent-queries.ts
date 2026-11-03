@@ -55,6 +55,27 @@ function toPaymentIntent(row: PaymentIntentRow): PaymentIntent {
 }
 
 /**
+ * Returns the intent with the given id that belongs to the given merchant, or
+ * `undefined` when there is none. One statement filters by both, so another
+ * merchant's intent and a missing one are the same empty result and the row of
+ * another tenant is never read. A stored row that the domain cannot represent
+ * throws, as in `toPaymentIntent`.
+ */
+export async function findPaymentIntentByIdForMerchant(
+  db: Database,
+  merchantId: string,
+  id: string,
+): Promise<PaymentIntent | undefined> {
+  const row = await db
+    .selectFrom('payment_intents')
+    .selectAll()
+    .where('merchant_id', '=', merchantId)
+    .where('id', '=', id)
+    .executeTakeFirst();
+  return row === undefined ? undefined : toPaymentIntent(row);
+}
+
+/**
  * Inserts the intent unless its merchant already has one with the same
  * `merchant_reference`, and returns the intent as PostgreSQL stored it, read
  * back through `RETURNING`, or `undefined` when nothing was inserted. The conflict is

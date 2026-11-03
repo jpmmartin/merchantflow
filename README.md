@@ -19,11 +19,12 @@ Today the repository contains the runnable foundation only:
 - request authentication: a global guard checks the `Authorization: Bearer <key>` header against the stored hash on every request, with deny-by-default routing and role checks (see Authentication);
 - merchant endpoints under `/api/v1/merchants`: create, read, list with stable pagination, update, change status, and issue and revoke API keys, each with role rules, tenant isolation, and an audit event (see Merchant endpoints);
 - payment intent creation, `POST /api/v1/payment-intents`, with a required `Idempotency-Key` and protection against a second intent for the same merchant order (see Payment intents); nothing is charged;
+- payment intent retrieval, `GET /api/v1/payment-intents/{id}`, scoped to the merchant of the key (see Payment intents);
 - a development seed, `pnpm db:seed`, that creates the first platform administrator key (see Demonstration: two merchants, neither sees the other);
 - linting, formatting, type checking, unit tests, and integration tests against a real PostgreSQL started with Testcontainers;
 - a GitHub Actions workflow that runs the same checks.
 
-Reading a payment intent, confirming (charging) it, processors, the ledger, and every other business capability are planned and do not exist yet.
+Listing payment intents, confirming (charging) one, processors, the ledger, and every other business capability are planned and do not exist yet.
 
 ## Prerequisites
 
@@ -100,7 +101,7 @@ Run each of these as `docker compose exec dev pnpm <script>`.
 
 ## API conventions
 
-Business endpoints live under `/api/v1`; the health endpoints keep their paths, `/health/live` and `/health/ready`. The business endpoints today are the merchant endpoints and payment intent creation (see Merchant endpoints and Payment intents).
+Business endpoints live under `/api/v1`; the health endpoints keep their paths, `/health/live` and `/health/ready`. The business endpoints today are the merchant endpoints and payment intent creation and retrieval (see Merchant endpoints and Payment intents).
 
 Every error response has the same body, and its `correlationId` equals the `X-Correlation-Id` response header. `message` is fixed text for each `code`; it never contains parser, framework, or internal details, and a validation error lists the field path and the rule code of each invalid field, never the received value.
 
@@ -197,6 +198,24 @@ The answer is `201` with `id`, `merchant_id`, `amount_minor`, `currency`, `merch
 "Same request" compares the validated fields, so key order and whitespace in the JSON do not matter. Only a created intent is stored under the key. A refused request (validation, role, a `DRAFT` or `SUSPENDED` merchant, a currency mismatch, a duplicate reference, a timeout) stores nothing, so the key stays free: the same request gets the same answer while the cause lasts, and succeeds under the same key once the cause is gone, for example after the merchant is reactivated. A replay of a created intent returns its stored response even if the merchant was suspended afterwards.
 
 `MERCHANT_READ_ONLY` and `PLATFORM_ADMIN` keys get `403 INSUFFICIENT_ROLE`. Each creation writes one `PAYMENT_INTENT_CREATED` audit event in the same transaction; a replay or a refused request writes none.
+
+### Reading a payment intent
+
+`GET /api/v1/payment-intents/{id}` returns one intent of the merchant of the key, for `MERCHANT_ADMIN` and `MERCHANT_READ_ONLY` keys.
+
+```bash
+curl -sS -w '\nHTTP %{http_code}\n' http://127.0.0.1:3000/api/v1/payment-intents/<intent id> \
+  -H "Authorization: Bearer $KEY_A"
+```
+
+The answer is `200` with the same body as the create response, and `amount_minor` is an integer string, exact up to `"9223372036854775807"`.
+
+- An intent of another merchant and an intent that does not exist are the same `404 NOT_FOUND`, with the same body apart from the correlation ID. The merchant always comes from the key, never from the path, a header, or a query parameter.
+- An `id` that is not a UUID is `400 VALIDATION_FAILED`, whichever merchant asks.
+- A `PLATFORM_ADMIN` key gets `403 INSUFFICIENT_ROLE` for every id, whether or not the intent exists: platform roles have no access to payments yet.
+- A `DRAFT` or `SUSPENDED` merchant can still read its intents: a read moves no money, and a suspended merchant needs to see what it created. Only payment commands require an `ACTIVE` merchant.
+- A stored intent that this version cannot represent, such as one in a currency the application does not support, is reported as `500 INTERNAL_ERROR` and logged. It is never answered as `404` and never altered.
+- A read writes no audit event and touches no idempotency record.
 
 ## Demonstration: two merchants, neither sees the other
 
@@ -331,7 +350,7 @@ The API reads its configuration from environment variables and refuses to start,
 
 - A request the JSON body parser rejects (malformed JSON, for instance) receives the standard error but writes no access log line.
 - No rate limit or input size limit beyond the parser's default exists yet. Only payment intent creation takes an idempotency key: creating a merchant twice creates two merchants.
-- There is no endpoint to read or list payment intents yet, nor to confirm one; idempotency records are kept and never deleted (no purge exists). `payment_intents` rejects deletes and changes of an intent's amount, currency, reference, or merchant through triggers that a database superuser or the table owner can still disable.
+- There is no endpoint to list payment intents yet, nor to confirm one; idempotency records are kept and never deleted (no purge exists). `payment_intents` rejects deletes and changes of an intent's amount, currency, reference, or merchant through triggers that a database superuser or the table owner can still disable.
 - The other business endpoints are the merchant endpoints: there is no endpoint to list the keys of a merchant (a key can be revoked by the `id` returned when it was issued), and no platform key can be issued through the API; the development seed is the only way to create one, and a lost platform key is replaced by revoking it in the database (see Recover a lost platform key). Payment confirmation, processors, ledger, and dashboard are planned.
 - The error responses of the health endpoints and of the unknown-route handler are not described in the OpenAPI document.
 - A merchant created or changed by a transaction that commits late can be missed by a list walk already past its position; the next walk shows it.

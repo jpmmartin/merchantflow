@@ -1,5 +1,11 @@
 import type { DatabaseSchema } from '@merchantflow/database';
 import type { ApiMerchant, IssuedKey, MerchantApi } from './merchant-api.js';
+import {
+  createIntent,
+  intentBody,
+  newKey,
+  type ApiPaymentIntent,
+} from './payment-intents.js';
 import type { TenantResources } from './tenant-routes.js';
 
 /** One merchant with a key of each merchant role and a key to be addressed. */
@@ -23,18 +29,28 @@ export interface Tenants {
 /** Identifier of a merchant that was never created. */
 export const MISSING_MERCHANT_ID = '4c1f6a52-7d0e-4f0a-9d53-2f2b6a1c9e10';
 const MISSING_KEY_ID = '9b7d2c1e-3a54-4e8f-8f0b-6d1a5c2e7f43';
+const MISSING_PAYMENT_INTENT_ID = '2d8e5b7a-61c3-4f9d-a0e4-7b3c9f1d6a58';
 
 async function createTenant(api: MerchantApi): Promise<Tenant> {
   const merchant = await api.createActiveMerchant();
   const admin = await api.keyFor(merchant.id, 'MERCHANT_ADMIN');
   const readOnly = await api.keyFor(merchant.id, 'MERCHANT_READ_ONLY');
   const spare = await api.keyFor(merchant.id, 'MERCHANT_READ_ONLY');
+  const intent = await createIntent(api, admin.key, newKey(), intentBody());
+  if (intent.status !== 201) {
+    throw new Error(`Expected 201, got ${intent.status}`);
+  }
+  const paymentIntentId = (intent.body as ApiPaymentIntent).id;
   return {
     merchant,
     admin,
     readOnly,
     spare,
-    resources: { merchantId: merchant.id, apiKeyId: spare.id },
+    resources: {
+      merchantId: merchant.id,
+      apiKeyId: spare.id,
+      paymentIntentId,
+    },
   };
 }
 
@@ -50,7 +66,11 @@ export async function createTenants(api: MerchantApi): Promise<Tenants> {
     a,
     b,
     platform: api.platform,
-    missing: { merchantId: MISSING_MERCHANT_ID, apiKeyId: MISSING_KEY_ID },
+    missing: {
+      merchantId: MISSING_MERCHANT_ID,
+      apiKeyId: MISSING_KEY_ID,
+      paymentIntentId: MISSING_PAYMENT_INTENT_ID,
+    },
   };
 }
 

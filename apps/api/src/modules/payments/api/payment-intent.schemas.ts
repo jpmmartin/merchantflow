@@ -17,6 +17,9 @@ const SUPPORTED_CURRENCIES =
  */
 const MERCHANT_REFERENCE_FORMAT = /^[!-~]{1,128}$/;
 
+/** The `:id` of a read request, validated before any tenant is consulted. */
+export const paymentIntentIdParamSchema = z.uuid();
+
 /**
  * The body of a create request. `amount_minor` is only typed here as a string:
  * its value is parsed by `parsePositiveMoney` from the domain, so a JSON number

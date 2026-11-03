@@ -1,5 +1,5 @@
 import type { ServerResponse } from 'node:http';
-import { Body, Controller, Post, Res } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Res } from '@nestjs/common';
 import {
   ApiBearerAuth,
   ApiHeader,
@@ -18,12 +18,22 @@ import {
 import type { IdempotencyJsonObject } from '../../idempotency/application/idempotency-record.js';
 import { CorrelationId } from '../../logging/correlation-id.decorator.js';
 import { CreatePaymentIntentService } from '../application/create-payment-intent.service.js';
-import { amountOf, toApiException } from './payment-intent-failures.js';
-import { toCreatedPaymentIntentResponse } from './payment-intent.presenter.js';
+import { GetPaymentIntentService } from '../application/get-payment-intent.service.js';
+import {
+  amountOf,
+  toApiException,
+  toGetApiException,
+} from './payment-intent-failures.js';
+import {
+  toCreatedPaymentIntentResponse,
+  toPaymentIntentResponse,
+} from './payment-intent.presenter.js';
 import {
   createPaymentIntentSchema,
+  paymentIntentIdParamSchema,
   paymentIntentResponseSchema,
   type CreatePaymentIntentBody,
+  type PaymentIntentResponse,
 } from './payment-intent.schemas.js';
 
 const RETRY_AFTER = {
@@ -39,6 +49,7 @@ const RETRY_AFTER = {
 export class PaymentIntentsController {
   constructor(
     private readonly createPaymentIntent: CreatePaymentIntentService,
+    private readonly getPaymentIntent: GetPaymentIntentService,
   ) {}
 
   @Post()
@@ -121,5 +132,60 @@ export class PaymentIntentsController {
     // returned as they are for that request and for every replay.
     response.statusCode = result.response.statusCode;
     return result.response.body;
+  }
+
+  // The path names an intent and no merchant, so listing the merchant roles
+  // here reveals nothing (AD-52): another merchant's intent is answered by the
+  // use case as 404. A platform key is refused by the guard for every id.
+  @Get(':id')
+  @Roles(['MERCHANT_ADMIN', 'MERCHANT_READ_ONLY'])
+  @ApiOperation({
+    summary: 'Read a payment intent',
+    description:
+      'Roles: MERCHANT_ADMIN and MERCHANT_READ_ONLY read the intents of their own merchant, whatever its status. An intent of another merchant is 404, indistinguishable from one that does not exist. PLATFORM_ADMIN is 403 for every id. A read writes no audit event.',
+  })
+  @ApiResponse({
+    status: 200,
+    description:
+      'The intent, with the same body as the create response. amount_minor is an integer string.',
+    standardSchema: paymentIntentResponseSchema,
+  })
+  @ApiErrorResponses(
+    {
+      status: 400,
+      description:
+        'VALIDATION_FAILED: the id is not a UUID. The answer does not depend on any merchant.',
+    },
+    {
+      status: 401,
+      description:
+        'UNAUTHENTICATED: the API key is missing, malformed, unknown, wrong, or revoked.',
+    },
+    {
+      status: 403,
+      description:
+        'INSUFFICIENT_ROLE: a platform key cannot read payment intents, whether or not the intent exists.',
+    },
+    {
+      status: 404,
+      description:
+        'NOT_FOUND: the intent does not exist or belongs to another merchant. The two cannot be told apart.',
+    },
+    {
+      status: 500,
+      description:
+        'INTERNAL_ERROR: unexpected failure, including a stored intent that this version cannot represent, such as one in an unsupported currency. It is never reported as 404.',
+    },
+  )
+  async get(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', { schema: paymentIntentIdParamSchema }) id: string,
+  ): Promise<PaymentIntentResponse> {
+    const result = await this.getPaymentIntent.execute({
+      principal,
+      paymentIntentId: id,
+    });
+    if (!result.ok) throw toGetApiException(result.code);
+    return toPaymentIntentResponse(result.intent);
   }
 }
