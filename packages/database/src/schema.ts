@@ -1,4 +1,10 @@
-import type { ColumnType, Kysely, Selectable, Transaction } from 'kysely';
+import type {
+  ColumnType,
+  Insertable,
+  Kysely,
+  Selectable,
+  Transaction,
+} from 'kysely';
 
 /** A JSON value as stored in a `jsonb` column. */
 export type JsonValue =
@@ -96,12 +102,38 @@ export interface IdempotencyRecordsTable {
 /** An `idempotency_records` row as selected, with every column at its read type. */
 export type IdempotencyRecordRow = Selectable<IdempotencyRecordsTable>;
 
+/**
+ * Row of `payment_intents`. It mirrors the table, not the domain
+ * `PaymentIntent`; the payments module maps between them. Only `status` and
+ * `updated_at` can be updated, matching the `payment_intents_restrict_update`
+ * trigger. `amount_minor` is a `BIGINT`, read as a `bigint` by the pool's type
+ * parsers and written from one. `status` lists the values of
+ * `payment_intents_status_check`.
+ */
+export interface PaymentIntentsTable {
+  id: ColumnType<string, string, never>;
+  merchant_id: ColumnType<string, string, never>;
+  amount_minor: ColumnType<bigint, bigint, never>;
+  currency: ColumnType<string, string, never>;
+  merchant_reference: ColumnType<string, string, never>;
+  status: 'CREATED' | 'PROCESSING' | 'SUCCEEDED' | 'FAILED' | 'UNKNOWN';
+  created_at: ColumnType<Date, Date, never>;
+  updated_at: Date;
+}
+
+/** A `payment_intents` row as selected, with every column at its read type. */
+export type PaymentIntentRow = Selectable<PaymentIntentsTable>;
+
+/** A `payment_intents` row as inserted, with every column at its insert type. */
+export type NewPaymentIntentRow = Insertable<PaymentIntentsTable>;
+
 /** Table types of the database, keyed by table name. */
 export interface DatabaseSchema {
   merchants: MerchantsTable;
   audit_events: AuditEventsTable;
   api_keys: ApiKeysTable;
   idempotency_records: IdempotencyRecordsTable;
+  payment_intents: PaymentIntentsTable;
 }
 
 /** The Kysely instance that every query and transaction goes through. */

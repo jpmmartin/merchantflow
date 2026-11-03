@@ -1,4 +1,5 @@
-import { API } from './merchant-api.js';
+import { randomUUID } from 'node:crypto';
+import { API, type MerchantRole } from './merchant-api.js';
 
 /**
  * The identifiers one tenant owns, which a route can name. Later increments add
@@ -16,6 +17,7 @@ export interface BuiltRequest {
   /** Path below the API prefix, with its query string if any. */
   readonly path: string;
   readonly body?: Record<string, unknown>;
+  readonly headers?: Readonly<Record<string, string>>;
 }
 
 /**
@@ -50,7 +52,29 @@ export interface CollectionRoute {
   readonly request: (resources: TenantResources) => BuiltRequest;
 }
 
-export type TenantRoute = ResourceRoute | CollectionRoute;
+/**
+ * A route that creates a resource for the merchant of the key and names no
+ * merchant in its path, so the tenant comes only from the principal. There is
+ * no 404 to compare: the suite checks that naming the other tenant elsewhere in
+ * the request never creates, changes, or reveals anything of it, that roles
+ * without the permission change nothing, and that the same request from two
+ * tenants creates two independent resources.
+ */
+export interface CommandRoute {
+  readonly kind: 'command';
+  readonly route: string;
+  /**
+   * A valid request. Each call returns a new one (for example with a new
+   * idempotency key and a new order reference), so two calls never collide.
+   */
+  readonly request: (resources: TenantResources) => BuiltRequest;
+  /** The merchant roles that may run the command; the others get 403. */
+  readonly allowedRoles: readonly MerchantRole[];
+  /** What a valid request from an allowed role answers. */
+  readonly created: number;
+}
+
+export type TenantRoute = ResourceRoute | CollectionRoute | CommandRoute;
 
 export const TENANT_ROUTES: readonly TenantRoute[] = [
   {
@@ -126,6 +150,21 @@ export const TENANT_ROUTES: readonly TenantRoute[] = [
     nested: true,
     platformExisting: 200,
     platformMissing: 404,
+  },
+  {
+    kind: 'command',
+    route: 'POST /payment-intents',
+    request: () => ({
+      path: '/payment-intents',
+      body: {
+        amount_minor: '1000',
+        currency: 'USD',
+        merchant_reference: `tenant-order-${randomUUID()}`,
+      },
+      headers: { 'Idempotency-Key': `tenant-${randomUUID()}` },
+    }),
+    allowedRoles: ['MERCHANT_ADMIN'],
+    created: 201,
   },
 ];
 

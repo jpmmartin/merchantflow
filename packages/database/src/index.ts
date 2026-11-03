@@ -8,6 +8,7 @@ export {
   type DatabaseOptions,
 } from './create-database.js';
 export { describeDatabaseFailure } from './describe-failure.js';
+export { isLockNotAvailable, setLocalLockTimeout } from './lock-timeout.js';
 export { pingDatabase } from './ping.js';
 export type {
   ApiKeyRow,
@@ -21,6 +22,9 @@ export type {
   JsonObject,
   JsonValue,
   MerchantsTable,
+  NewPaymentIntentRow,
+  PaymentIntentRow,
+  PaymentIntentsTable,
 } from './schema.js';
 export {
   MIGRATION_DATABASE_SETTINGS,

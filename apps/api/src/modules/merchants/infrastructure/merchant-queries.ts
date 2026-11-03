@@ -4,6 +4,7 @@ import type {
   MerchantListPosition,
   MerchantProfileChanges,
 } from '../application/merchant-changes.js';
+import type { MerchantPaymentProfile } from '../application/merchant-payment-profile.js';
 
 function toRow(merchant: Merchant): MerchantsTable {
   return {
@@ -176,4 +177,28 @@ export async function listMerchants(
     .limit(page.limit)
     .execute();
   return rows.map(toMerchant);
+}
+
+/**
+ * Returns what a payment command needs to know about a merchant, its status and
+ * its currency, and holds a share lock on its row until the transaction ends,
+ * or returns `undefined` when none exists. The lock blocks a concurrent status
+ * change, which updates the row, until the transaction ends, and a status
+ * change that is already running makes this read wait for it and then return
+ * the new status. Several payment commands of one merchant share the lock and
+ * do not wait for each other.
+ */
+export async function findMerchantPaymentProfileForShare(
+  db: Database,
+  id: string,
+): Promise<MerchantPaymentProfile | undefined> {
+  const row = await db
+    .selectFrom('merchants')
+    .select(['id', 'status', 'default_currency'])
+    .where('id', '=', id)
+    .forShare()
+    .executeTakeFirst();
+  if (row === undefined) return undefined;
+  const status: MerchantStatus = row.status;
+  return { id: row.id, status, defaultCurrency: row.default_currency };
 }

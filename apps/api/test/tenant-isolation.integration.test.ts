@@ -16,8 +16,10 @@ import {
   urlOf,
   type BuiltRequest,
   type CollectionRoute,
+  type CommandRoute,
   type ResourceRoute,
   type TenantResources,
+  type TenantRoute,
 } from './support/tenant-routes.js';
 import {
   SCHEMA_TABLES,
@@ -31,7 +33,8 @@ import {
 
 /*
  * Cross-tenant isolation, driven by TENANT_ROUTES (support/tenant-routes.ts).
- * A later increment adds its routes there; this file needs no change.
+ * A later increment adds its routes there; this file changes only when a route
+ * needs a new kind of entry.
  */
 
 type MerchantRole = 'MERCHANT_ADMIN' | 'MERCHANT_READ_ONLY';
@@ -54,9 +57,12 @@ const RESOURCE_ROUTES = TENANT_ROUTES.filter(
 const COLLECTION_ROUTES = TENANT_ROUTES.filter(
   (entry): entry is CollectionRoute => entry.kind === 'collection',
 );
+const COMMAND_ROUTES = TENANT_ROUTES.filter(
+  (entry): entry is CommandRoute => entry.kind === 'command',
+);
 
 /** A name for an entry; routes that repeat are told apart by their body. */
-function labelOf(entry: ResourceRoute | CollectionRoute): string {
+function labelOf(entry: TenantRoute): string {
   const body = entry.request({ merchantId: 'x', apiKeyId: 'y' }).body;
   return body === undefined
     ? entry.route
@@ -217,7 +223,10 @@ describe('tenant isolation', () => {
       default:
         throw new Error(`Unsupported method in ${route}`);
     }
-    for (const [name, value] of Object.entries(headers)) {
+    for (const [name, value] of Object.entries({
+      ...built.headers,
+      ...headers,
+    })) {
       call.set(name, value);
     }
     return call;
@@ -534,6 +543,133 @@ describe('tenant isolation', () => {
     }
   });
 
+  describe.each(
+    COMMAND_ROUTES.map((entry) => [labelOf(entry), entry] as const),
+  )('commands: %s', (_label, entry) => {
+    const deniedRoles = MERCHANT_ROLES.filter(
+      (role) => !entry.allowedRoles.includes(role),
+    );
+
+    it('has a merchant role that may run it', () => {
+      expect(entry.allowedRoles.length).toBeGreaterThan(0);
+    });
+
+    for (const [from, to] of DIRECTIONS) {
+      for (const role of entry.allowedRoles) {
+        it(`${role} of ${from.toUpperCase()} acts only on its own merchant`, async () => {
+          const caller = tenants[from];
+          const target = tenants[to];
+          const before = await snapshotDatabase(api);
+
+          const response = await send(
+            keyOf(caller, role),
+            entry.route,
+            entry.request(caller.resources),
+          );
+
+          expect(response.status).toBe(entry.created);
+          expect(response.text).toContain(caller.merchant.id);
+          expect(response.text).not.toContain(target.merchant.id);
+          expect(
+            rowsMentioning(await snapshotDatabase(api), target.merchant.id),
+          ).toEqual(rowsMentioning(before, target.merchant.id));
+        });
+
+        for (const selector of ALL_SELECTORS) {
+          it(`${role} of ${from.toUpperCase()} naming ${to.toUpperCase()} through ${selector.name} creates nothing for ${to.toUpperCase()}`, async () => {
+            const caller = tenants[from];
+            const target = tenants[to];
+            // Always the other tenant: naming the caller's own merchant is
+            // not an attempt to reach anyone else.
+            const aimed = selector.apply(
+              splitRoute(entry.route).method,
+              entry.request(caller.resources),
+              target.merchant.id,
+            );
+            if (aimed === undefined) return;
+            const before = await snapshotDatabase(api);
+
+            const response = await send(
+              keyOf(caller, role),
+              entry.route,
+              aimed.built,
+              aimed.headers,
+            );
+
+            // A field the strict body does not define is invalid input
+            // (400); a header or query parameter the route ignores leaves a
+            // request that acts on the caller's own merchant.
+            expect([entry.created, 400]).toContain(response.status);
+            if (response.status === entry.created) {
+              expect(response.text).toContain(caller.merchant.id);
+            } else {
+              expectUnchanged(
+                before,
+                await snapshotDatabase(api),
+                selector.name,
+              );
+            }
+            expect(response.text).not.toContain(target.merchant.id);
+            expect(
+              rowsMentioning(await snapshotDatabase(api), target.merchant.id),
+            ).toEqual(rowsMentioning(before, target.merchant.id));
+          });
+        }
+      }
+
+      for (const role of deniedRoles) {
+        it(`${role} of ${from.toUpperCase()} gets 403 and nothing changes`, async () => {
+          const before = await snapshotDatabase(api);
+
+          const response = await send(
+            keyOf(tenants[from], role),
+            entry.route,
+            entry.request(tenants[from].resources),
+          );
+
+          expect(response.status).toBe(403);
+          expect(errorOf(response).code).toBe('INSUFFICIENT_ROLE');
+          expectUnchanged(before, await snapshotDatabase(api), role);
+        });
+      }
+    }
+
+    it('gives the platform key 403 and changes nothing', async () => {
+      const before = await snapshotDatabase(api);
+
+      const response = await send(
+        tenants.platform.key,
+        entry.route,
+        entry.request(tenants.a.resources),
+      );
+
+      expect(response.status).toBe(403);
+      expect(errorOf(response).code).toBe('INSUFFICIENT_ROLE');
+      expectUnchanged(before, await snapshotDatabase(api), 'platform key');
+    });
+
+    it('creates two independent resources for the same request from each tenant', async () => {
+      const [role] = entry.allowedRoles;
+      if (role === undefined) throw new Error('No allowed role');
+      // One request, headers included, sent by both tenants.
+      const built = entry.request(tenants.a.resources);
+
+      const fromA = await send(keyOf(tenants.a, role), entry.route, built);
+      const fromB = await send(keyOf(tenants.b, role), entry.route, built);
+      const againFromA = await send(keyOf(tenants.a, role), entry.route, built);
+
+      expect(fromA.status).toBe(entry.created);
+      expect(fromB.status).toBe(entry.created);
+      expect(fromA.text).toContain(tenants.a.merchant.id);
+      expect(fromA.text).not.toContain(tenants.b.merchant.id);
+      expect(fromB.text).toContain(tenants.b.merchant.id);
+      expect(fromB.text).not.toContain(tenants.a.merchant.id);
+      // The second request of A is a replay of its own first one.
+      expect(againFromA.status).toBe(fromA.status);
+      expect(againFromA.text).toBe(fromA.text);
+    });
+  });
+
   describe('reads of an own resource that name another tenant', () => {
     const reads = RESOURCE_ROUTES.filter(
       (entry) => splitRoute(entry.route).method === 'GET',
@@ -590,6 +726,7 @@ describe('tenant isolation', () => {
           'POST /merchants',
           'GET /merchants/:id',
           'POST /merchants/:id/api-keys/:apiKeyId/revoke',
+          'POST /payment-intents',
         ]),
       );
     });

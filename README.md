@@ -14,15 +14,16 @@ Today the repository contains the runnable foundation only:
 - structured JSON logs with a correlation ID on every request;
 - one error format for every failure, with a stable `code`, a safe message, and the correlation ID, plus request validation with Zod and an OpenAPI document served outside production (see API conventions);
 - a forward-only SQL migration runner (`pnpm db:migrate`);
-- database tables for merchants, API keys, and an append-only audit trail, with the constraints enforced by PostgreSQL itself;
+- database tables for merchants, API keys, an append-only audit trail, idempotency records, and payment intents, with the constraints enforced by PostgreSQL itself;
 - API keys: 256 bits of randomness, only a lookup identifier and a SHA-256 hash stored, and an audit event for each issuance and revocation;
 - request authentication: a global guard checks the `Authorization: Bearer <key>` header against the stored hash on every request, with deny-by-default routing and role checks (see Authentication);
 - merchant endpoints under `/api/v1/merchants`: create, read, list with stable pagination, update, change status, and issue and revoke API keys, each with role rules, tenant isolation, and an audit event (see Merchant endpoints);
+- payment intent creation, `POST /api/v1/payment-intents`, with a required `Idempotency-Key` and protection against a second intent for the same merchant order (see Payment intents); nothing is charged;
 - a development seed, `pnpm db:seed`, that creates the first platform administrator key (see Demonstration: two merchants, neither sees the other);
 - linting, formatting, type checking, unit tests, and integration tests against a real PostgreSQL started with Testcontainers;
 - a GitHub Actions workflow that runs the same checks.
 
-Payments, processors, the ledger, and every other business capability are planned and do not exist yet.
+Reading a payment intent, confirming (charging) it, processors, the ledger, and every other business capability are planned and do not exist yet.
 
 ## Prerequisites
 
@@ -95,11 +96,11 @@ Run each of these as `docker compose exec dev pnpm <script>`.
 | `db:migrate`       | Builds the project, applies pending SQL migrations to the database in `DATABASE_URL`, and prints status |
 | `db:seed`          | Builds the project and creates the development platform administrator key, printed once (see Demonstration) |
 
-`pnpm db:migrate` is safe to run repeatedly: applied migrations are recorded and never run twice, and concurrent runs are serialized by a database lock. The first run on an empty database creates the `merchants` and `audit_events` tables, and later runs report `Nothing is pending.` It empties `apps/api/dist` when it builds, which can interrupt a `pnpm dev` that is restarting at that moment.
+`pnpm db:migrate` is safe to run repeatedly: applied migrations are recorded and never run twice, and concurrent runs are serialized by a database lock. The first run on an empty database creates the tables (`merchants`, `audit_events`, `api_keys`, `idempotency_records`, and `payment_intents`), and later runs report `Nothing is pending.` It empties `apps/api/dist` when it builds, which can interrupt a `pnpm dev` that is restarting at that moment.
 
 ## API conventions
 
-Business endpoints live under `/api/v1`; the health endpoints keep their paths, `/health/live` and `/health/ready`. The only business endpoints today are the merchant endpoints (see Merchant endpoints).
+Business endpoints live under `/api/v1`; the health endpoints keep their paths, `/health/live` and `/health/ready`. The business endpoints today are the merchant endpoints and payment intent creation (see Merchant endpoints and Payment intents).
 
 Every error response has the same body, and its `correlationId` equals the `X-Correlation-Id` response header. `message` is fixed text for each `code`; it never contains parser, framework, or internal details, and a validation error lists the field path and the rule code of each invalid field, never the received value.
 
@@ -123,6 +124,14 @@ Every error response has the same body, and its `correlationId` equals the `X-Co
 | `NOT_FOUND`              | 404    | Unknown route, unsupported method, or a resource the caller cannot see         |
 | `MERCHANT_TRANSITION_NOT_ALLOWED` | 409 | The merchant's status cannot change to the requested one (including to itself) |
 | `MERCHANT_STATUS_CONFLICT` | 409  | Another request changed the merchant's status first; nothing was changed       |
+| `IDEMPOTENCY_KEY_MISSING` | 400   | A command was sent without its required `Idempotency-Key` header               |
+| `IDEMPOTENCY_KEY_INVALID` | 400   | The `Idempotency-Key` header is not 1 to 255 visible ASCII characters          |
+| `MERCHANT_NOT_ACTIVE`    | 403    | Payment commands need an `ACTIVE` merchant; nothing was stored                 |
+| `IDEMPOTENCY_KEY_REUSED` | 409    | The key was already used for a different request                               |
+| `OPERATION_IN_PROGRESS`  | 409    | The same request under the key has not finished; has `Retry-After`             |
+| `DUPLICATE_MERCHANT_REFERENCE` | 409 | The merchant already has a payment intent for this `merchant_reference`    |
+| `MERCHANT_CURRENCY_MISMATCH` | 422 | The currency is not the merchant's default currency                          |
+| `OPERATION_TIMEOUT`      | 503    | The request waited too long for another one; nothing was stored, retry it; has `Retry-After` |
 | `REQUEST_REJECTED`       | 4xx    | Any other client error, with its own status                                    |
 | `PAYLOAD_TOO_LARGE`      | 413    | The body exceeds the parser's default limit                                    |
 | `UNSUPPORTED_MEDIA_TYPE` | 415    | The body encoding is not supported                                             |
@@ -156,6 +165,38 @@ All of them need an API key (see Authentication) and use `snake_case` fields. Me
 - The OpenAPI document (outside production) lists each endpoint with its roles, schemas, error responses, and the `bearer` security scheme.
 
 The first platform administrator key cannot be created through the API; `pnpm db:seed` creates it (see Demonstration).
+
+## Payment intents
+
+A payment intent is a merchant's intention to collect an amount. Creating one charges nothing; confirming it through a processor is planned.
+
+`POST /api/v1/payment-intents` needs a `MERCHANT_ADMIN` key of an `ACTIVE` merchant and an `Idempotency-Key` header. The intent always belongs to the merchant of the key.
+
+```bash
+curl -sS -w '\nHTTP %{http_code}\n' -X POST http://127.0.0.1:3000/api/v1/payment-intents \
+  -H "Authorization: Bearer $KEY_A" -H 'Content-Type: application/json' \
+  -H 'Idempotency-Key: order-1001-attempt-1' \
+  -d '{"amount_minor":"1000","currency":"USD","merchant_reference":"order-1001"}'
+```
+
+The answer is `201` with `id`, `merchant_id`, `amount_minor`, `currency`, `merchant_reference`, `status` (`CREATED`), `created_at`, and `updated_at`.
+
+- `amount_minor` is the amount in minor units as an integer string greater than zero, for example `"1000"` for 10.00 USD, up to `"9223372036854775807"`. It is never read as a JSON number: a number, a sign, a decimal point, spaces, or leading zeros are a `400 VALIDATION_FAILED` whose issue names the reason (`invalid_type`, `empty`, `invalid_format`, `leading_zero`, `out_of_range`, or `not_positive`).
+- `currency` must be a supported currency (`USD` for now) and the merchant's `default_currency`; a supported currency that differs is `422 MERCHANT_CURRENCY_MISMATCH`.
+- `merchant_reference` is the merchant's own order identifier: 1 to 128 visible ASCII characters, case-sensitive. A merchant has at most one intent per reference, whatever key created it: a new key with a taken reference is `409 DUPLICATE_MERCHANT_REFERENCE`.
+- `Idempotency-Key` is 1 to 255 visible ASCII characters (no spaces), scoped by merchant. Use a new key for each new intent and the same key when retrying the same request.
+
+| Request under a key                            | Answer                                                        |
+| ---------------------------------------------- | ------------------------------------------------------------- |
+| First use                                      | Creates the intent: `201`, stored under the key               |
+| Same key, same request, after it completed     | The stored `201` and body, byte for byte; nothing is written  |
+| Same key, same request, still running          | `409 OPERATION_IN_PROGRESS` with `Retry-After`                |
+| Same key, different request                    | `409 IDEMPOTENCY_KEY_REUSED`                                  |
+| Waited more than 2 seconds for another request | `503 OPERATION_TIMEOUT` with `Retry-After`; send it again     |
+
+"Same request" compares the validated fields, so key order and whitespace in the JSON do not matter. Only a created intent is stored under the key. A refused request (validation, role, a `DRAFT` or `SUSPENDED` merchant, a currency mismatch, a duplicate reference, a timeout) stores nothing, so the key stays free: the same request gets the same answer while the cause lasts, and succeeds under the same key once the cause is gone, for example after the merchant is reactivated. A replay of a created intent returns its stored response even if the merchant was suspended afterwards.
+
+`MERCHANT_READ_ONLY` and `PLATFORM_ADMIN` keys get `403 INSUFFICIENT_ROLE`. Each creation writes one `PAYMENT_INTENT_CREATED` audit event in the same transaction; a replay or a refused request writes none.
 
 ## Demonstration: two merchants, neither sees the other
 
@@ -289,8 +330,9 @@ The API reads its configuration from environment variables and refuses to start,
 ## Current limitations
 
 - A request the JSON body parser rejects (malformed JSON, for instance) receives the standard error but writes no access log line.
-- No rate limit, idempotency key, or input size limit beyond the parser's default exists yet. Creating a merchant twice creates two merchants.
-- The only business endpoints are the merchant endpoints: there is no endpoint to list the keys of a merchant (a key can be revoked by the `id` returned when it was issued), and no platform key can be issued through the API; the development seed is the only way to create one, and a lost platform key is replaced by revoking it in the database (see Recover a lost platform key). Payments, processors, ledger, and dashboard are planned.
+- No rate limit or input size limit beyond the parser's default exists yet. Only payment intent creation takes an idempotency key: creating a merchant twice creates two merchants.
+- There is no endpoint to read or list payment intents yet, nor to confirm one; idempotency records are kept and never deleted (no purge exists). `payment_intents` rejects deletes and changes of an intent's amount, currency, reference, or merchant through triggers that a database superuser or the table owner can still disable.
+- The other business endpoints are the merchant endpoints: there is no endpoint to list the keys of a merchant (a key can be revoked by the `id` returned when it was issued), and no platform key can be issued through the API; the development seed is the only way to create one, and a lost platform key is replaced by revoking it in the database (see Recover a lost platform key). Payment confirmation, processors, ledger, and dashboard are planned.
 - The error responses of the health endpoints and of the unknown-route handler are not described in the OpenAPI document.
 - A merchant created or changed by a transaction that commits late can be missed by a list walk already past its position; the next walk shows it.
 - `api_keys` accepts only the `PLATFORM_ADMIN`, `MERCHANT_ADMIN`, and `MERCHANT_READ_ONLY` roles; rows can be revoked once and never removed or reactivated, through triggers that a database superuser or the table owner can still disable.

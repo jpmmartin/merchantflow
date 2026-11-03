@@ -5,6 +5,10 @@ import { errorResponseSchema } from './error-response.js';
 interface DocumentedError {
   readonly status: number;
   readonly description: string;
+  /** Response headers the status carries, such as `Retry-After`. */
+  readonly headers?: Readonly<
+    Record<string, { readonly description: string; readonly type: 'integer' }>
+  >;
 }
 
 /**
@@ -18,6 +22,19 @@ export function ApiErrorResponses(...errors: readonly DocumentedError[]) {
         status: error.status,
         description: error.description,
         standardSchema: errorResponseSchema,
+        ...(error.headers === undefined
+          ? {}
+          : {
+              headers: Object.fromEntries(
+                Object.entries(error.headers).map(([name, header]) => [
+                  name,
+                  {
+                    description: header.description,
+                    schema: { type: header.type },
+                  },
+                ]),
+              ),
+            }),
       }),
     ),
   );

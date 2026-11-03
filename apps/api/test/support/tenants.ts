@@ -65,6 +65,8 @@ export const SCHEMA_TABLES = [
   'merchants',
   'audit_events',
   'api_keys',
+  'idempotency_records',
+  'payment_intents',
 ] as const satisfies readonly (keyof DatabaseSchema)[];
 
 /**
