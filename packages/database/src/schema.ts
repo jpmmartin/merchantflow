@@ -1,4 +1,4 @@
-import type { ColumnType, Kysely, Selectable } from 'kysely';
+import type { ColumnType, Kysely, Selectable, Transaction } from 'kysely';
 
 /** A JSON value as stored in a `jsonb` column. */
 export type JsonValue =
@@ -71,12 +71,44 @@ export interface ApiKeysTable {
 /** An `api_keys` row as selected, with every column at its read type. */
 export type ApiKeyRow = Selectable<ApiKeysTable>;
 
+/**
+ * Row of `idempotency_records`. The scope, the fingerprint, the operation ID,
+ * and the creation time have no update type, matching the
+ * `idempotency_records_restrict_update` trigger. `status` lists the values of
+ * `idempotency_records_status_check`. `response_body` is a `json` column: it is
+ * written as serialized JSON and read back parsed, in its original key order.
+ */
+export interface IdempotencyRecordsTable {
+  id: ColumnType<string, string, never>;
+  merchant_id: ColumnType<string, string, never>;
+  operation: ColumnType<string, string, never>;
+  idempotency_key: ColumnType<string, string, never>;
+  request_fingerprint: ColumnType<string, string, never>;
+  operation_id: ColumnType<string, string, never>;
+  status: 'IN_PROGRESS' | 'COMPLETED';
+  response_status_code: number | null;
+  response_body: ColumnType<JsonObject | null, string | null, string>;
+  created_at: ColumnType<Date, Date, never>;
+  completed_at: Date | null;
+  expires_at: Date;
+}
+
+/** An `idempotency_records` row as selected, with every column at its read type. */
+export type IdempotencyRecordRow = Selectable<IdempotencyRecordsTable>;
+
 /** Table types of the database, keyed by table name. */
 export interface DatabaseSchema {
   merchants: MerchantsTable;
   audit_events: AuditEventsTable;
   api_keys: ApiKeysTable;
+  idempotency_records: IdempotencyRecordsTable;
 }
 
 /** The Kysely instance that every query and transaction goes through. */
 export type Database = Kysely<DatabaseSchema>;
+
+/**
+ * An open transaction of `Database`. Code that must run inside the caller's
+ * transaction takes this type: a plain `Database` does not satisfy it.
+ */
+export type DatabaseTransaction = Transaction<DatabaseSchema>;
