@@ -107,7 +107,7 @@ export class PaymentIntentsController {
     {
       status: 503,
       description:
-        'OPERATION_TIMEOUT: the request waited too long for another request that holds the same key, the same merchant_reference, or the merchant. Nothing was stored; send the same request with the same key again.',
+        'OPERATION_TIMEOUT: the request waited too long for another request that holds the same key, the same merchant_reference, or the merchant. SERVICE_BUSY: no database connection became free in time. Nothing was stored; send the same request with the same key again.',
       headers: RETRY_AFTER,
     },
   )

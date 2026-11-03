@@ -1,6 +1,7 @@
 import { Kysely, PostgresDialect } from 'kysely';
 import { Pool } from 'pg';
 import { bigintTypes } from './bigint-types.js';
+import { boundPoolCheckout } from './pool-checkout.js';
 import type { Database, DatabaseSchema } from './schema.js';
 
 /**
@@ -8,6 +9,7 @@ import type { Database, DatabaseSchema } from './schema.js';
  *
  * - `connectionTimeoutMillis` bounds both waiting for a free connection and
  *   opening a new one, so an unreachable server fails fast instead of hanging.
+ *   A wait for a free connection that runs out fails with `DatabaseBusyError`.
  * - `queryTimeoutMillis` is a client-side limit. It rejects the call but does
  *   not cancel the statement on the server, so a write that times out has an
  *   unknown outcome.
@@ -49,12 +51,14 @@ export interface DatabaseOptions {
  */
 export function createDatabase(options: DatabaseOptions): Database {
   const defaults = DEFAULT_DATABASE_SETTINGS;
+  const maxConnections = options.maxConnections ?? defaults.maxConnections;
+  const connectionTimeoutMillis =
+    options.connectionTimeoutMillis ?? defaults.connectionTimeoutMillis;
   const pool = new Pool({
     connectionString: options.connectionString,
     application_name: options.applicationName ?? defaults.applicationName,
-    max: options.maxConnections ?? defaults.maxConnections,
-    connectionTimeoutMillis:
-      options.connectionTimeoutMillis ?? defaults.connectionTimeoutMillis,
+    max: maxConnections,
+    connectionTimeoutMillis,
     query_timeout: options.queryTimeoutMillis ?? defaults.queryTimeoutMillis,
     idle_in_transaction_session_timeout:
       options.idleInTransactionSessionTimeoutMillis ??
@@ -81,5 +85,12 @@ export function createDatabase(options: DatabaseOptions): Database {
   // The pool re-emits the error of an idle client after the client listener
   // above has reported it, and the pool itself must have a listener too.
   pool.on('error', () => undefined);
-  return new Kysely<DatabaseSchema>({ dialect: new PostgresDialect({ pool }) });
+  return new Kysely<DatabaseSchema>({
+    dialect: new PostgresDialect({
+      pool: boundPoolCheckout(pool, {
+        maxConnections,
+        checkoutTimeoutMillis: connectionTimeoutMillis,
+      }),
+    }),
+  });
 }

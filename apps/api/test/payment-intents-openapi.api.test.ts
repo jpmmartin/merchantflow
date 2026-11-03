@@ -155,7 +155,7 @@ describe('OpenAPI document of POST /payment-intents', () => {
       ],
     ],
     ['422', ['MERCHANT_CURRENCY_MISMATCH']],
-    ['503', ['OPERATION_TIMEOUT']],
+    ['503', ['OPERATION_TIMEOUT', 'SERVICE_BUSY']],
   ])('names the codes of %s', (status, codes) => {
     const description = operation.responses[status]?.description ?? '';
     for (const code of codes) {

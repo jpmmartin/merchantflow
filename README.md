@@ -21,7 +21,7 @@ Today the repository contains the runnable foundation only:
 - payment intent creation, `POST /api/v1/payment-intents`, with a required `Idempotency-Key` and protection against a second intent for the same merchant order (see Payment intents); nothing is charged;
 - payment intent retrieval, `GET /api/v1/payment-intents/{id}`, scoped to the merchant of the key (see Payment intents);
 - a development seed, `pnpm db:seed`, that creates the first platform administrator key (see Demonstration: two merchants, neither sees the other);
-- linting, formatting, type checking, unit tests, and integration tests against a real PostgreSQL started with Testcontainers;
+- linting, formatting, type checking, unit tests, and integration tests against a real PostgreSQL started with Testcontainers, including an HTTP concurrency suite (`tests/concurrency`) that sends 50 simultaneous requests to the listening API and checks that duplicates create one intent;
 - a GitHub Actions workflow that runs the same checks.
 
 Listing payment intents, confirming (charging) one, processors, the ledger, and every other business capability are planned and do not exist yet.
@@ -89,7 +89,7 @@ Run each of these as `docker compose exec dev pnpm <script>`.
 | `dev`              | Builds the database package and starts the API in watch mode on port 3000                               |
 | `build`            | Compiles every package                                                                                  |
 | `test`             | Runs the unit and API tests; they need no database                                                      |
-| `test:integration` | Runs the integration tests; they start PostgreSQL containers through Testcontainers and need Docker     |
+| `test:integration` | Runs the integration tests, the concurrency suite in `tests/concurrency` included; they start PostgreSQL containers through Testcontainers and need Docker |
 | `lint`             | Runs ESLint, including type-aware rules                                                                 |
 | `typecheck`        | Type-checks every package without emitting files                                                        |
 | `format`           | Rewrites files with Prettier                                                                            |
@@ -133,6 +133,7 @@ Every error response has the same body, and its `correlationId` equals the `X-Co
 | `DUPLICATE_MERCHANT_REFERENCE` | 409 | The merchant already has a payment intent for this `merchant_reference`    |
 | `MERCHANT_CURRENCY_MISMATCH` | 422 | The currency is not the merchant's default currency                          |
 | `OPERATION_TIMEOUT`      | 503    | The request waited too long for another one; nothing was stored, retry it; has `Retry-After` |
+| `SERVICE_BUSY`           | 503    | No database connection became free within 2 seconds; nothing was changed, retry the same request; has `Retry-After` |
 | `REQUEST_REJECTED`       | 4xx    | Any other client error, with its own status                                    |
 | `PAYLOAD_TOO_LARGE`      | 413    | The body exceeds the parser's default limit                                    |
 | `UNSUPPORTED_MEDIA_TYPE` | 415    | The body encoding is not supported                                             |
@@ -194,6 +195,7 @@ The answer is `201` with `id`, `merchant_id`, `amount_minor`, `currency`, `merch
 | Same key, same request, still running          | `409 OPERATION_IN_PROGRESS` with `Retry-After`                |
 | Same key, different request                    | `409 IDEMPOTENCY_KEY_REUSED`                                  |
 | Waited more than 2 seconds for another request | `503 OPERATION_TIMEOUT` with `Retry-After`; send it again     |
+| No database connection free within 2 seconds  | `503 SERVICE_BUSY` with `Retry-After`; send it again          |
 
 "Same request" compares the validated fields, so key order and whitespace in the JSON do not matter. Only a created intent is stored under the key. A refused request (validation, role, a `DRAFT` or `SUSPENDED` merchant, a currency mismatch, a duplicate reference, a timeout) stores nothing, so the key stays free: the same request gets the same answer while the cause lasts, and succeeds under the same key once the cause is gone, for example after the merchant is reactivated. A replay of a created intent returns its stored response even if the merchant was suspended afterwards.
 
@@ -356,6 +358,7 @@ The API reads its configuration from environment variables and refuses to start,
 - A merchant created or changed by a transaction that commits late can be missed by a list walk already past its position; the next walk shows it.
 - `api_keys` accepts only the `PLATFORM_ADMIN`, `MERCHANT_ADMIN`, and `MERCHANT_READ_ONLY` roles; rows can be revoked once and never removed or reactivated, through triggers that a database superuser or the table owner can still disable.
 - `audit_events` rejects updates, deletes, and truncation through a trigger, which a database superuser or the table owner can still disable. Audit metadata must never hold secrets or payment credentials.
+- The API's database pool has 10 connections. A request that waits more than 2 seconds for one, on any endpoint, receives `503 SERVICE_BUSY` with `Retry-After` and changed nothing; `GET /health/ready` answers `503` while the pool stays full.
 - The setup is verified on Docker Desktop only (see Prerequisites).
 - The GitHub Actions workflow has not run on a hosted runner yet.
 - There is no production build, deployment configuration, or container image for running the API outside development.

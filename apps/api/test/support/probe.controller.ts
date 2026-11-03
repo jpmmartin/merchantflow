@@ -8,6 +8,7 @@ import {
   Query,
   ServiceUnavailableException,
 } from '@nestjs/common';
+import { DatabaseBusyError } from '@merchantflow/database';
 import { z } from 'zod';
 import { Public } from '../../src/modules/auth/api/route-access.js';
 
@@ -63,5 +64,10 @@ export class ProbeController {
   @Get('forbidden')
   forbidden(): never {
     throw new ForbiddenException(INTERNAL_FAILURE_MESSAGE);
+  }
+
+  @Get('database-busy')
+  databaseBusy(): never {
+    throw new DatabaseBusyError(2_000);
   }
 }

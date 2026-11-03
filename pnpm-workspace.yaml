@@ -1,6 +1,7 @@
 packages:
   - apps/*
   - packages/*
+  - tests/*
 allowBuilds:
   "@scarf/scarf": false
   cpu-features: false

@@ -228,6 +228,23 @@ describe('API error contract', () => {
       expect(failure?.['msg']).toBe('Unhandled exception');
     });
 
+    it('maps a database checkout timeout to a retryable 503 SERVICE_BUSY', async () => {
+      const before = lines().length;
+
+      const response = await request(server).get('/api/v1/probe/database-busy');
+
+      expectErrorShape(response, 503, 'SERVICE_BUSY');
+      expect(response.headers['retry-after']).toBe('1');
+      expect(response.text).not.toContain('No database connection');
+      const written = lines().slice(before);
+      expect(written.filter((line) => line['err'] !== undefined)).toEqual([]);
+      expect(
+        written.filter(
+          (line) => line.msg === 'No database connection became free in time',
+        ),
+      ).toHaveLength(1);
+    });
+
     it('does not log an error line for expected failures', async () => {
       const before = lines().length;
 

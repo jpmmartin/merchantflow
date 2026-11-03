@@ -326,6 +326,36 @@ importers:
         specifier: 5.0.5
         version: 5.0.5(@types/node@26.6.6)(vite@8.3.5(@types/node@26.6.6)(yaml@2.9.1))
 
+  tests/concurrency:
+    devDependencies:
+      '@merchantflow/api':
+        specifier: workspace:*
+        version: link:../../apps/api
+      '@merchantflow/database':
+        specifier: workspace:*
+        version: link:../../packages/database
+      '@merchantflow/test-support':
+        specifier: workspace:*
+        version: link:../../packages/test-support
+      '@types/node':
+        specifier: 26.6.6
+        version: 26.6.6
+      '@types/pg':
+        specifier: 8.23.1
+        version: 8.23.1
+      pg:
+        specifier: 8.23.1
+        version: 8.23.1
+      typescript:
+        specifier: 6.0.3
+        version: 6.0.3
+      vite:
+        specifier: 8.3.5
+        version: 8.3.5(@types/node@26.6.6)(yaml@2.9.1)
+      vitest:
+        specifier: 5.0.5
+        version: 5.0.5(@types/node@26.6.6)(vite@8.3.5(@types/node@26.6.6)(yaml@2.9.1))
+
 packages:
 
   '@angular-devkit/core@22.2.3':

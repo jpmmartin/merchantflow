@@ -8,6 +8,11 @@ export {
   type DatabaseOptions,
 } from './create-database.js';
 export { describeDatabaseFailure } from './describe-failure.js';
+export {
+  DATABASE_BUSY_CODE,
+  DatabaseBusyError,
+  isDatabaseBusy,
+} from './pool-checkout.js';
 export { isLockNotAvailable, setLocalLockTimeout } from './lock-timeout.js';
 export { pingDatabase } from './ping.js';
 export type {

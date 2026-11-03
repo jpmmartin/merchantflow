@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import { isDatabaseBusy } from '@merchantflow/database';
 import {
   Catch,
   HttpException,
@@ -20,6 +21,7 @@ type Outcome =
       readonly code: ErrorCode;
       readonly issues?: readonly ValidationIssue[] | undefined;
     }
+  | { readonly kind: 'busy' }
   | { readonly kind: 'unexpected' };
 
 const BAD_REQUEST = 400;
@@ -29,10 +31,15 @@ const MAX_CLIENT_ERROR_STATUS = 499;
 /**
  * Decides the public outcome of an exception. Only the exception's kind and
  * status are read, never its message. A Nest `HttpException` with a 4xx status
- * is a client error; every other exception, including a 5xx `HttpException`, is
+ * is a client error. A database checkout that found no free connection in time
+ * ran nothing, so it is the retryable `SERVICE_BUSY`, whichever code path
+ * waited. Every other exception, including a 5xx `HttpException`, is
  * unexpected and answered with a generic 500.
  */
 function classify(exception: unknown): Outcome {
+  if (isDatabaseBusy(exception)) {
+    return { kind: 'busy' };
+  }
   if (exception instanceof ApiException) {
     return {
       kind: 'expected',
@@ -57,8 +64,9 @@ function classify(exception: unknown): Outcome {
 /**
  * Turns every exception into the one error shape. Responses carry a fixed
  * message per code, so no framework, parser, or internal text reaches the
- * client. An unexpected exception is logged once with its stack and the
- * correlation ID, and answered with a generic 500.
+ * client. A busy database is logged as a warning, since it means the pool is
+ * too small for the load. An unexpected exception is logged once with its
+ * stack and the correlation ID, and answered with a generic 500.
  */
 @Catch()
 export class ApiExceptionFilter implements ExceptionFilter {
@@ -82,6 +90,10 @@ export class ApiExceptionFilter implements ExceptionFilter {
           status: outcome.status,
           issues: outcome.issues,
         });
+        return;
+      case 'busy':
+        this.logger.warn('No database connection became free in time');
+        replyWithError(httpAdapter, request, response, 'SERVICE_BUSY');
         return;
       case 'unexpected':
         this.logger.error({ err: exception }, 'Unhandled exception');

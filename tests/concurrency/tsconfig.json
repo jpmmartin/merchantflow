@@ -1,0 +1,9 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "experimentalDecorators": true,
+    "types": ["node"],
+    "customConditions": ["@merchantflow/source"]
+  },
+  "include": ["test/**/*.ts", "vitest.integration.config.ts"]
+}

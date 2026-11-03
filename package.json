@@ -16,8 +16,8 @@
     "test": "pnpm -r --if-present test",
     "test:integration": "pnpm -r --if-present test:integration",
     "lint": "eslint .",
-    "format": "prettier --write --no-error-on-unmatched-pattern \"apps/**/*.{ts,json}\" \"packages/**/*.{ts,json}\" \"*.{mjs,json,yml}\"",
-    "format:check": "prettier --check --no-error-on-unmatched-pattern \"apps/**/*.{ts,json}\" \"packages/**/*.{ts,json}\" \"*.{mjs,json,yml}\"",
+    "format": "prettier --write --no-error-on-unmatched-pattern \"apps/**/*.{ts,json}\" \"packages/**/*.{ts,json}\" \"tests/**/*.{ts,json}\" \"*.{mjs,json,yml}\"",
+    "format:check": "prettier --check --no-error-on-unmatched-pattern \"apps/**/*.{ts,json}\" \"packages/**/*.{ts,json}\" \"tests/**/*.{ts,json}\" \"*.{mjs,json,yml}\"",
     "typecheck": "pnpm -r --if-present typecheck"
   },
   "devDependencies": {

@@ -16,6 +16,7 @@ export const ERROR_CODES = [
   'IDEMPOTENCY_KEY_REUSED',
   'OPERATION_IN_PROGRESS',
   'OPERATION_TIMEOUT',
+  'SERVICE_BUSY',
   'MERCHANT_NOT_ACTIVE',
   'MERCHANT_CURRENCY_MISMATCH',
   'DUPLICATE_MERCHANT_REFERENCE',
@@ -108,6 +109,14 @@ export const ERROR_DEFINITIONS: Readonly<Record<ErrorCode, ErrorDefinition>> = {
     status: 503,
     message:
       'The operation could not be completed in time. Nothing was changed; retry the same request.',
+    headers: { 'Retry-After': '1' },
+  },
+  // Every database connection stayed busy for the whole wait, so the request
+  // ran nothing on the database: it changed nothing and can be sent again.
+  SERVICE_BUSY: {
+    status: 503,
+    message:
+      'The service is busy. Nothing was changed; retry the same request.',
     headers: { 'Retry-After': '1' },
   },
   // Payment commands require an ACTIVE merchant.
