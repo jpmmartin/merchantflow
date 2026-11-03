@@ -9,7 +9,7 @@
     "pnpm": "12.16.1"
   },
   "scripts": {
-    "dev": "pnpm --filter @merchantflow/database build && pnpm --filter @merchantflow/api dev",
+    "dev": "pnpm --filter @merchantflow/domain --filter @merchantflow/database build && pnpm --filter @merchantflow/api dev",
     "build": "pnpm -r --if-present build",
     "db:migrate": "pnpm build && pnpm --filter @merchantflow/api db:migrate",
     "test": "pnpm -r --if-present test",

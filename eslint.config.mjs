@@ -35,6 +35,39 @@ export default defineConfig(
     },
   },
   {
+    // The domain package uses only the language and standard library
+    // (AD-32 layering): no framework, database, validation, or provider code.
+    files: ['packages/domain/**/*.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: [
+                '@nestjs/*',
+                'kysely',
+                'kysely/*',
+                'pg',
+                'pg/*',
+                'zod',
+                'zod/*',
+                '@merchantflow/*',
+                'stripe',
+                '@stripe/*',
+                '@adyen/*',
+                'adyen-*',
+                'braintree',
+              ],
+              message:
+                'packages/domain must not import frameworks, database drivers, validation libraries, or provider SDKs.',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
     files: ['**/*.mjs'],
     extends: [tseslint.configs.disableTypeChecked],
   },
