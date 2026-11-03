@@ -6,3 +6,18 @@ export {
 export { describeDatabaseFailure } from './describe-failure.js';
 export { pingDatabase } from './ping.js';
 export type { Database, DatabaseSchema } from './schema.js';
+export {
+  MIGRATION_DATABASE_SETTINGS,
+  createMigrationDatabase,
+  getMigrationStatus,
+  runMigrations,
+  type AppliedMigration,
+  type MigrationOptions,
+  type MigrationRunResult,
+  type MigrationStatus,
+} from './migrations/run-migrations.js';
+export {
+  InvalidMigrationError,
+  MIGRATIONS_DIRECTORY,
+  SqlMigrationProvider,
+} from './migrations/sql-migration-provider.js';
