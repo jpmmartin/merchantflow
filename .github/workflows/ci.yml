@@ -1,0 +1,88 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# The workflow only reads the repository; it uses no secrets.
+permissions:
+  contents: read
+
+# A newer run for the same ref supersedes the one in progress.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    # Empty PostgreSQL 17 database for the migration validation, with
+    # throwaway credentials that exist only for this job.
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: merchantflow_ci
+          POSTGRES_USER: merchantflow_ci
+          POSTGRES_PASSWORD: ci-throwaway-password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U merchantflow_ci -d merchantflow_ci"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # The version comes from `packageManager` in package.json (pnpm 12.16.1).
+      - name: Set up pnpm
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+
+      # Same Node.js version as the project image (Dockerfile).
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 26.13.0
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Check formatting
+        run: pnpm format:check
+
+      - name: Unit tests
+        run: pnpm test
+
+      # Testcontainers starts its own PostgreSQL containers through the Docker
+      # daemon of the runner.
+      - name: Integration tests
+        run: pnpm test:integration
+
+      - name: Build
+        run: pnpm build
+
+      - name: Validate migrations (first run)
+        run: pnpm db:migrate
+        env:
+          DATABASE_URL: postgresql://merchantflow_ci:ci-throwaway-password@127.0.0.1:5432/merchantflow_ci
+
+      - name: Validate migrations (second run)
+        run: pnpm db:migrate
+        env:
+          DATABASE_URL: postgresql://merchantflow_ci:ci-throwaway-password@127.0.0.1:5432/merchantflow_ci
