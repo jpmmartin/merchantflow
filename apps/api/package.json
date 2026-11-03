@@ -10,7 +10,8 @@
     "test": "vitest run",
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "db:migrate": "node dist/cli/migrate.js"
+    "db:migrate": "node dist/cli/migrate.js",
+    "db:seed": "node dist/cli/seed.js"
   },
   "dependencies": {
     "@merchantflow/database": "workspace:*",

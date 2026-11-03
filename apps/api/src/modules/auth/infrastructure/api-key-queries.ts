@@ -92,3 +92,22 @@ export async function revokeActiveApiKey(
     .executeTakeFirst();
   return row === undefined ? undefined : toApiKey(row);
 }
+
+/**
+ * Returns the oldest active platform key, or `undefined` when there is none. A
+ * revoked key does not count.
+ */
+export async function findActivePlatformApiKey(
+  db: Database,
+): Promise<ApiKey | undefined> {
+  const row = await db
+    .selectFrom('api_keys')
+    .selectAll()
+    .where('merchant_id', 'is', null)
+    .where('revoked_at', 'is', null)
+    .orderBy('created_at')
+    .orderBy('id')
+    .limit(1)
+    .executeTakeFirst();
+  return row === undefined ? undefined : toApiKey(row);
+}

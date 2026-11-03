@@ -12,6 +12,7 @@
     "dev": "pnpm --filter @merchantflow/domain --filter @merchantflow/database build && pnpm --filter @merchantflow/api dev",
     "build": "pnpm -r --if-present build",
     "db:migrate": "pnpm build && pnpm --filter @merchantflow/api db:migrate",
+    "db:seed": "pnpm build && pnpm --filter @merchantflow/api db:seed",
     "test": "pnpm -r --if-present test",
     "test:integration": "pnpm -r --if-present test:integration",
     "lint": "eslint .",

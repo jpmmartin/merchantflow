@@ -18,6 +18,7 @@ Today the repository contains the runnable foundation only:
 - API keys: 256 bits of randomness, only a lookup identifier and a SHA-256 hash stored, and an audit event for each issuance and revocation;
 - request authentication: a global guard checks the `Authorization: Bearer <key>` header against the stored hash on every request, with deny-by-default routing and role checks (see Authentication);
 - merchant endpoints under `/api/v1/merchants`: create, read, list with stable pagination, update, change status, and issue and revoke API keys, each with role rules, tenant isolation, and an audit event (see Merchant endpoints);
+- a development seed, `pnpm db:seed`, that creates the first platform administrator key (see Demonstration: two merchants, neither sees the other);
 - linting, formatting, type checking, unit tests, and integration tests against a real PostgreSQL started with Testcontainers;
 - a GitHub Actions workflow that runs the same checks.
 
@@ -92,6 +93,7 @@ Run each of these as `docker compose exec dev pnpm <script>`.
 | `format`           | Rewrites files with Prettier                                                                            |
 | `format:check`     | Fails if any file is not formatted with Prettier                                                        |
 | `db:migrate`       | Builds the project, applies pending SQL migrations to the database in `DATABASE_URL`, and prints status |
+| `db:seed`          | Builds the project and creates the development platform administrator key, printed once (see Demonstration) |
 
 `pnpm db:migrate` is safe to run repeatedly: applied migrations are recorded and never run twice, and concurrent runs are serialized by a database lock. The first run on an empty database creates the `merchants` and `audit_events` tables, and later runs report `Nothing is pending.` It empties `apps/api/dist` when it builds, which can interrupt a `pnpm dev` that is restarting at that moment.
 
@@ -152,7 +154,110 @@ All of them need an API key (see Authentication) and use `snake_case` fields. Me
 - Every change writes one audit event in the same transaction, naming the API key that made it and the request's correlation ID. Updates record the previous and new values of the changed fields.
 - The OpenAPI document (outside production) lists each endpoint with its roles, schemas, error responses, and the `bearer` security scheme.
 
-The first platform administrator key cannot be created through the API. The development seed that creates it is planned (T-01-08); until then it is issued from code, as the integration tests do.
+The first platform administrator key cannot be created through the API; `pnpm db:seed` creates it (see Demonstration).
+
+## Demonstration: two merchants, neither sees the other
+
+This walk-through reproduces the first increment from a running stack: a platform administrator registers two merchants, activates them, and issues each an administrator key; each merchant then reads its own data and gets `404` for the other's. It uses synthetic data only. Docker Compose commands run on the host and `pnpm` commands inside the `dev` container (see Running commands); the `curl` commands run on the host. Replace each `<placeholder>` with the value the previous step printed. No real key appears in this document.
+
+**1. Start the stack and install the dependencies** (Quick start, steps 1 and 2). Do not start `pnpm dev` yet: `pnpm db:migrate` and `pnpm db:seed` rebuild and empty `apps/api/dist`, which a running `pnpm dev` also writes to. If it is running, stop it first.
+
+**2. Apply the migrations.**
+
+```bash
+docker compose exec dev pnpm db:migrate
+```
+
+**3. Create the platform administrator key.**
+
+```bash
+docker compose exec dev pnpm db:seed
+```
+
+The command prints the full key once, on its own line after `Platform administrator API key created`. Copy it now: only its hash is stored, so it cannot be shown again. The key is never written to a file or to the logs (the JSON log lines go to standard error). Save it in your shell for the next steps:
+
+```bash
+export PLATFORM_KEY='<key printed by db:seed>'
+```
+
+The seed refuses to run when `NODE_ENV` is `production`. It fails with a message, and creates nothing, when `DATABASE_URL` is invalid, PostgreSQL is unreachable, or the database is not migrated. Running it again is safe: while an active platform key exists it prints that one exists, with its row ID and creation time, changes nothing, and never prints a key. To get a key after losing the printed one, see Recover a lost platform key below.
+
+**4. Start the API** and leave it running. Use a second terminal for the rest.
+
+```bash
+docker compose exec dev pnpm dev
+```
+
+**5. Register and activate two merchants.** Each `POST` answers `201` with the merchant, and its `id` goes into the next commands. A new merchant is `DRAFT` until the platform administrator activates it.
+
+```bash
+curl -sS -w '\nHTTP %{http_code}\n' -X POST http://127.0.0.1:3000/api/v1/merchants \
+  -H "Authorization: Bearer $PLATFORM_KEY" -H 'Content-Type: application/json' \
+  -d '{"legal_name":"Alpha Coffee LLC","display_name":"Alpha Coffee","business_type":"LLC","industry":"Retail","country_code":"US","default_currency":"USD"}'
+
+curl -sS -w '\nHTTP %{http_code}\n' -X POST http://127.0.0.1:3000/api/v1/merchants \
+  -H "Authorization: Bearer $PLATFORM_KEY" -H 'Content-Type: application/json' \
+  -d '{"legal_name":"Beta Books LLC","display_name":"Beta Books","business_type":"LLC","industry":"Retail","country_code":"US","default_currency":"USD"}'
+```
+
+```bash
+export MERCHANT_A_ID='<id of Alpha Coffee>'
+export MERCHANT_B_ID='<id of Beta Books>'
+
+curl -sS -w '\nHTTP %{http_code}\n' -X POST "http://127.0.0.1:3000/api/v1/merchants/$MERCHANT_A_ID/status" \
+  -H "Authorization: Bearer $PLATFORM_KEY" -H 'Content-Type: application/json' -d '{"status":"ACTIVE"}'
+
+curl -sS -w '\nHTTP %{http_code}\n' -X POST "http://127.0.0.1:3000/api/v1/merchants/$MERCHANT_B_ID/status" \
+  -H "Authorization: Bearer $PLATFORM_KEY" -H 'Content-Type: application/json' -d '{"status":"ACTIVE"}'
+```
+
+Both answer `200` with `"status":"ACTIVE"`.
+
+**6. Issue a `MERCHANT_ADMIN` key for each merchant.** Each answer is `201` and holds the key in its `key` field, once.
+
+```bash
+curl -sS -w '\nHTTP %{http_code}\n' -X POST "http://127.0.0.1:3000/api/v1/merchants/$MERCHANT_A_ID/api-keys" \
+  -H "Authorization: Bearer $PLATFORM_KEY" -H 'Content-Type: application/json' -d '{"role":"MERCHANT_ADMIN"}'
+
+curl -sS -w '\nHTTP %{http_code}\n' -X POST "http://127.0.0.1:3000/api/v1/merchants/$MERCHANT_B_ID/api-keys" \
+  -H "Authorization: Bearer $PLATFORM_KEY" -H 'Content-Type: application/json' -d '{"role":"MERCHANT_ADMIN"}'
+```
+
+```bash
+export KEY_A='<key of Alpha Coffee>'
+export KEY_B='<key of Beta Books>'
+```
+
+**7. Each merchant reads its own data, and gets `404` for the other's.** The first and fourth commands answer `200` with the caller's own merchant. The second and third answer `404 NOT_FOUND`, with the same body as for a merchant that does not exist.
+
+```bash
+curl -sS -w '\nHTTP %{http_code}\n' "http://127.0.0.1:3000/api/v1/merchants/$MERCHANT_A_ID" -H "Authorization: Bearer $KEY_A"
+curl -sS -w '\nHTTP %{http_code}\n' "http://127.0.0.1:3000/api/v1/merchants/$MERCHANT_B_ID" -H "Authorization: Bearer $KEY_A"
+curl -sS -w '\nHTTP %{http_code}\n' "http://127.0.0.1:3000/api/v1/merchants/$MERCHANT_A_ID" -H "Authorization: Bearer $KEY_B"
+curl -sS -w '\nHTTP %{http_code}\n' "http://127.0.0.1:3000/api/v1/merchants/$MERCHANT_B_ID" -H "Authorization: Bearer $KEY_B"
+```
+
+A merchant key also lists only its own merchant, and cannot change a status or issue keys (`403 INSUFFICIENT_ROLE`):
+
+```bash
+curl -sS -w '\nHTTP %{http_code}\n' "http://127.0.0.1:3000/api/v1/merchants" -H "Authorization: Bearer $KEY_A"
+curl -sS -w '\nHTTP %{http_code}\n' -X POST "http://127.0.0.1:3000/api/v1/merchants/$MERCHANT_A_ID/status" \
+  -H "Authorization: Bearer $KEY_A" -H 'Content-Type: application/json' -d '{"status":"SUSPENDED"}'
+```
+
+**8. Clean up.** The demonstration leaves two merchants, three keys, and their audit events in the Compose database. Stop the API, unset the variables (`unset PLATFORM_KEY KEY_A KEY_B MERCHANT_A_ID MERCHANT_B_ID`), and delete the data with `docker compose down --volumes`, which also deletes the dependency volumes. Rows of `api_keys` and `audit_events` cannot be deleted one by one, by design.
+
+### Recover a lost platform key
+
+A key that was not saved cannot be shown again, and the seed will not create a second one while the first is active. In development, revoke it and run the seed again. The statement below is a manual change: it writes no audit event.
+
+```bash
+docker compose exec postgres psql -U merchantflow -d merchantflow \
+  -c "UPDATE api_keys SET revoked_at = now() WHERE merchant_id IS NULL AND revoked_at IS NULL"
+docker compose exec dev pnpm db:seed
+```
+
+Alternatively, `docker compose down --volumes` followed by the Quick start gives an empty database.
 
 ## Authentication
 
@@ -184,7 +289,7 @@ The API reads its configuration from environment variables and refuses to start,
 
 - A request the JSON body parser rejects (malformed JSON, for instance) receives the standard error but writes no access log line.
 - No rate limit, idempotency key, or input size limit beyond the parser's default exists yet. Creating a merchant twice creates two merchants.
-- The only business endpoints are the merchant endpoints: there is no endpoint to list the keys of a merchant (a key can be revoked by the `id` returned when it was issued), and no platform key can be issued through the API. Payments, processors, ledger, and dashboard are planned.
+- The only business endpoints are the merchant endpoints: there is no endpoint to list the keys of a merchant (a key can be revoked by the `id` returned when it was issued), and no platform key can be issued through the API; the development seed is the only way to create one, and a lost platform key is replaced by revoking it in the database (see Recover a lost platform key). Payments, processors, ledger, and dashboard are planned.
 - The error responses of the health endpoints and of the unknown-route handler are not described in the OpenAPI document.
 - A merchant created or changed by a transaction that commits late can be missed by a list walk already past its position; the next walk shows it.
 - `api_keys` accepts only the `PLATFORM_ADMIN`, `MERCHANT_ADMIN`, and `MERCHANT_READ_ONLY` roles; rows can be revoked once and never removed or reactivated, through triggers that a database superuser or the table owner can still disable.

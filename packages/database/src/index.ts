@@ -1,4 +1,8 @@
 export {
+  withTryAdvisoryLock,
+  type AdvisoryLockResult,
+} from './advisory-lock.js';
+export {
   DEFAULT_DATABASE_SETTINGS,
   createDatabase,
   type DatabaseOptions,
