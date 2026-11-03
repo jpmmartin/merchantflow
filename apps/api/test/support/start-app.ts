@@ -3,6 +3,7 @@ import type { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { Logger } from 'nestjs-pino';
 import { vi } from 'vitest';
+import type { Clock } from '../../src/modules/clock/clock.js';
 
 export interface LogLine {
   level: number;
@@ -20,18 +21,25 @@ export interface LogLine {
  * process, so a second application would write its out-of-request lines to the
  * first one's output.
  */
-export async function startApp(databaseUrl: string) {
+export async function startApp(
+  databaseUrl: string,
+  options: { readonly clock?: Clock } = {},
+) {
   vi.stubEnv('DATABASE_URL', databaseUrl);
   vi.stubEnv('LOG_LEVEL', 'info');
-  const [{ AppModule }, { LOG_DESTINATION }] = await Promise.all([
+  const [{ AppModule }, { LOG_DESTINATION }, { CLOCK }] = await Promise.all([
     import('../../src/app.module.js'),
     import('../../src/modules/logging/logging.module.js'),
+    import('../../src/modules/clock/clock.js'),
   ]);
   const output: string[] = [];
-  const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
+  let builder = Test.createTestingModule({ imports: [AppModule] })
     .overrideProvider(LOG_DESTINATION)
-    .useValue({ write: (chunk: string) => void output.push(chunk) })
-    .compile();
+    .useValue({ write: (chunk: string) => void output.push(chunk) });
+  if (options.clock !== undefined) {
+    builder = builder.overrideProvider(CLOCK).useValue(options.clock);
+  }
+  const moduleRef = await builder.compile();
   const app: INestApplication = moduleRef.createNestApplication({
     bufferLogs: true,
   });

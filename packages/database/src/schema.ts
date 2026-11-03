@@ -1,4 +1,4 @@
-import type { ColumnType, Kysely } from 'kysely';
+import type { ColumnType, Kysely, Selectable } from 'kysely';
 
 /** A JSON value as stored in a `jsonb` column. */
 export type JsonValue =
@@ -48,10 +48,34 @@ export interface AuditEventsTable {
   metadata: ColumnType<JsonObject, string, never>;
 }
 
+/**
+ * Row of `api_keys`. Only `revoked_at` can be updated: the other columns have
+ * no update type, matching the `api_keys_restrict_update` trigger. `role` lists
+ * the values of `api_keys_role_scope_check`, and `secret_hash` is the SHA-256 of
+ * the secret part of the key, never the key itself.
+ */
+export interface ApiKeysTable {
+  id: ColumnType<string, string, never>;
+  lookup_id: ColumnType<string, string, never>;
+  secret_hash: ColumnType<string, string, never>;
+  merchant_id: ColumnType<string | null, string | null, never>;
+  role: ColumnType<
+    'PLATFORM_ADMIN' | 'MERCHANT_ADMIN' | 'MERCHANT_READ_ONLY',
+    'PLATFORM_ADMIN' | 'MERCHANT_ADMIN' | 'MERCHANT_READ_ONLY',
+    never
+  >;
+  created_at: ColumnType<Date, Date, never>;
+  revoked_at: Date | null;
+}
+
+/** An `api_keys` row as selected, with every column at its read type. */
+export type ApiKeyRow = Selectable<ApiKeysTable>;
+
 /** Table types of the database, keyed by table name. */
 export interface DatabaseSchema {
   merchants: MerchantsTable;
   audit_events: AuditEventsTable;
+  api_keys: ApiKeysTable;
 }
 
 /** The Kysely instance that every query and transaction goes through. */

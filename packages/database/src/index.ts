@@ -6,6 +6,8 @@ export {
 export { describeDatabaseFailure } from './describe-failure.js';
 export { pingDatabase } from './ping.js';
 export type {
+  ApiKeyRow,
+  ApiKeysTable,
   AuditEventsTable,
   Database,
   DatabaseSchema,

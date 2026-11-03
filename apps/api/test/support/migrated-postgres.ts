@@ -12,6 +12,7 @@ type Postgres = Awaited<ReturnType<typeof startPostgres>>;
  * query functions under test.
  */
 export interface MigratedPostgres {
+  readonly connectionString: string;
   readonly client: Client;
   readonly db: Database;
   stop(): Promise<void>;
@@ -27,6 +28,7 @@ export async function startMigratedPostgres(): Promise<MigratedPostgres> {
     onConnectionError: () => undefined,
   });
   return {
+    connectionString: postgres.getConnectionUri(),
     client,
     db,
     async stop() {

@@ -14,6 +14,7 @@ Today the repository contains the runnable foundation only:
 - structured JSON logs with a correlation ID on every request;
 - a forward-only SQL migration runner (`pnpm db:migrate`);
 - database tables for merchants and an append-only audit trail, with the constraints enforced by PostgreSQL itself (storage only: there are no merchant endpoints yet);
+- API key issuance and revocation inside the API code: keys carry 256 bits of randomness, only a lookup identifier and a SHA-256 hash are stored, and each issuance or revocation writes an audit event (no endpoint or authentication guard uses them yet);
 - linting, formatting, type checking, unit tests, and integration tests against a real PostgreSQL started with Testcontainers;
 - a GitHub Actions workflow that runs the same checks.
 
@@ -107,7 +108,8 @@ The API reads its configuration from environment variables and refuses to start,
 
 ## Current limitations
 
-- Only the foundation and the merchant and audit tables exist: no merchant or authentication endpoints, payments, processors, ledger, or dashboard. These are planned.
+- Only the foundation, the merchant, audit, and API key tables, and the key issuance and revocation code exist: no merchant or authentication endpoints, no request authentication, payments, processors, ledger, or dashboard. These are planned.
+- `api_keys` accepts only the `PLATFORM_ADMIN`, `MERCHANT_ADMIN`, and `MERCHANT_READ_ONLY` roles; rows can be revoked once and never removed or reactivated, through triggers that a database superuser or the table owner can still disable.
 - `audit_events` rejects updates, deletes, and truncation through a trigger, which a database superuser or the table owner can still disable. Audit metadata must never hold secrets or payment credentials.
 - The setup is verified on Docker Desktop only (see Prerequisites).
 - The GitHub Actions workflow has not run on a hosted runner yet.
