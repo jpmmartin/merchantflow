@@ -1,5 +1,6 @@
 import type { ServerResponse } from 'node:http';
 import { Controller, Get, HttpStatus, Res } from '@nestjs/common';
+import { Public } from '../../auth/api/route-access.js';
 import {
   GetLivenessService,
   type LivenessReport,
@@ -9,6 +10,8 @@ import {
   type ReadinessReport,
 } from '../application/get-readiness.service.js';
 
+// Probes are read by orchestrators that hold no API key and expose no data.
+@Public()
 @Controller('health')
 export class HealthController {
   constructor(

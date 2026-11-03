@@ -99,7 +99,13 @@ export function createLoggerParams(
     level,
     redact: { paths: REDACTED_PATHS, censor: '[Redacted]' },
   };
-  return { pinoHttp: destination ? [options, destination] : options };
+  return {
+    pinoHttp: destination ? [options, destination] : options,
+    // Fields that application code adds with `PinoLogger.assign` (the API key
+    // row, role, and merchant, set by the authentication guard) also reach the
+    // access line. By default `assign` leaves that line untouched.
+    assignResponse: true,
+  };
 }
 
 /**

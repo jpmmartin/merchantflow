@@ -6,6 +6,8 @@
 export const ERROR_CODES = [
   'VALIDATION_FAILED',
   'MALFORMED_JSON',
+  'UNAUTHENTICATED',
+  'INSUFFICIENT_ROLE',
   'NOT_FOUND',
   'PAYLOAD_TOO_LARGE',
   'UNSUPPORTED_MEDIA_TYPE',
@@ -20,6 +22,8 @@ interface ErrorDefinition {
   readonly status: number;
   /** Human-readable text that is safe to show to any caller. */
   readonly message: string;
+  /** Headers that always accompany the code, such as `WWW-Authenticate`. */
+  readonly headers?: Readonly<Record<string, string>>;
 }
 
 /**
@@ -35,6 +39,18 @@ export const ERROR_DEFINITIONS: Readonly<Record<ErrorCode, ErrorDefinition>> = {
   MALFORMED_JSON: {
     status: 400,
     message: 'The request body is not valid JSON.',
+  },
+  // One message and one challenge for every authentication failure, so the
+  // response never tells a missing key from a malformed, unknown, wrong, or
+  // revoked one. The challenge carries no `error` parameter for the same reason.
+  UNAUTHENTICATED: {
+    status: 401,
+    message: 'A valid API key is required.',
+    headers: { 'WWW-Authenticate': 'Bearer' },
+  },
+  INSUFFICIENT_ROLE: {
+    status: 403,
+    message: 'The API key role does not allow this operation.',
   },
   NOT_FOUND: {
     status: 404,

@@ -9,6 +9,7 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { z } from 'zod';
+import { Public } from '../../src/modules/auth/api/route-access.js';
 
 export const INTERNAL_FAILURE_MESSAGE = 'internal-failure-detail-5b8e1f';
 
@@ -29,7 +30,10 @@ const listItemsQuerySchema = z.object({
  * Routes that exist only in tests. They exercise validation, the error
  * mapping, and the OpenAPI generation without adding a business endpoint to
  * the production code.
+ * They are public because they test validation and error mapping, not access
+ * control; `auth-probe.controllers.ts` covers the guard.
  */
+@Public()
 @Controller('probe')
 export class ProbeController {
   @Post('items')

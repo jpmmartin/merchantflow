@@ -55,5 +55,8 @@ export function replyWithError(
     },
   };
   if (response.headersSent) return;
+  for (const [name, value] of Object.entries(definition.headers ?? {})) {
+    response.setHeader(name, value);
+  }
   httpAdapter.reply(response, body, options.status ?? definition.status);
 }

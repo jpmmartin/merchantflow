@@ -15,7 +15,8 @@ Today the repository contains the runnable foundation only:
 - one error format for every failure, with a stable `code`, a safe message, and the correlation ID, plus request validation with Zod and an OpenAPI document served outside production (see API conventions);
 - a forward-only SQL migration runner (`pnpm db:migrate`);
 - database tables for merchants and an append-only audit trail, with the constraints enforced by PostgreSQL itself (storage only: there are no merchant endpoints yet);
-- API key issuance and revocation inside the API code: keys carry 256 bits of randomness, only a lookup identifier and a SHA-256 hash are stored, and each issuance or revocation writes an audit event (no endpoint or authentication guard uses them yet);
+- API key issuance and revocation inside the API code: keys carry 256 bits of randomness, only a lookup identifier and a SHA-256 hash are stored, and each issuance or revocation writes an audit event (no endpoint issues or revokes keys yet);
+- request authentication: a global guard checks the `Authorization: Bearer <key>` header against the stored hash on every request, with deny-by-default routing and role checks (see Authentication). No business endpoint exists yet, so only the tests exercise it;
 - linting, formatting, type checking, unit tests, and integration tests against a real PostgreSQL started with Testcontainers;
 - a GitHub Actions workflow that runs the same checks.
 
@@ -114,6 +115,8 @@ Every error response has the same body, and its `correlationId` equals the `X-Co
 | ------------------------ | ------ | ------------------------------------------------------------------------------ |
 | `VALIDATION_FAILED`      | 400    | Body, query, or route parameters do not match their schema; has `issues`       |
 | `MALFORMED_JSON`         | 400    | The body is not valid JSON                                                     |
+| `UNAUTHENTICATED`        | 401    | The API key is missing, malformed, unknown, wrong, or revoked                  |
+| `INSUFFICIENT_ROLE`      | 403    | The API key is valid but its role does not allow the operation                 |
 | `REQUEST_REJECTED`       | 4xx    | Any other client error, with its own status                                    |
 | `NOT_FOUND`              | 404    | Unknown route, unsupported method, or (later) a resource the caller cannot see |
 | `PAYLOAD_TOO_LARGE`      | 413    | The body exceeds the parser's default limit                                    |
@@ -123,6 +126,18 @@ Every error response has the same body, and its `correlationId` equals the `X-Co
 The `/health/ready` answer is the exception: its `503` body stays `{"status":"unavailable"}`, because probes read the status.
 
 Outside production (`NODE_ENV` other than `production`) the API serves its OpenAPI document at `GET /docs/openapi.json` and an interactive UI at `GET /docs`. In production neither exists.
+
+## Authentication
+
+Every route requires an API key unless it is explicitly marked public. Send it as `Authorization: Bearer mfk_<lookup id>_<secret>`. The health probes and the OpenAPI document (outside production) need no key.
+
+- A missing header, another scheme, a malformed key, an unknown key, a wrong secret, and a revoked key all receive the same `401` with code `UNAUTHENTICATED` and a `WWW-Authenticate: Bearer` header, so a caller cannot tell which case occurred.
+- A valid key whose role a route does not accept receives `403` with code `INSUFFICIENT_ROLE`.
+- Revocation is checked on every request and nothing is cached, so a revoked key stops working with its next request.
+- A route that declares neither the roles it accepts nor that it is public is denied, even to a valid key.
+- The merchant a request acts for comes only from the key, never from the path, query, body, or a header.
+- A key of a `DRAFT` or `SUSPENDED` merchant still authenticates; what each status allows is decided by the command that runs, not by the guard.
+- Logs record the key's row ID, role, and merchant ID, and never the key or any part of its secret.
 
 ## Configuration
 
@@ -142,7 +157,7 @@ The API reads its configuration from environment variables and refuses to start,
 
 - A request the JSON body parser rejects (malformed JSON, for instance) receives the standard error but writes no access log line.
 - The OpenAPI document does not describe error responses yet, and no rate limit or input size limit beyond the parser's default exists.
-- Only the foundation, the merchant, audit, and API key tables, and the key issuance and revocation code exist: no merchant or authentication endpoints, no request authentication, payments, processors, ledger, or dashboard. These are planned.
+- Only the foundation, the merchant, audit, and API key tables, and the key issuance and revocation code exist: no merchant endpoints, no endpoint to issue or revoke keys, payments, processors, ledger, or dashboard. These are planned.
 - `api_keys` accepts only the `PLATFORM_ADMIN`, `MERCHANT_ADMIN`, and `MERCHANT_READ_ONLY` roles; rows can be revoked once and never removed or reactivated, through triggers that a database superuser or the table owner can still disable.
 - `audit_events` rejects updates, deletes, and truncation through a trigger, which a database superuser or the table owner can still disable. Audit metadata must never hold secrets or payment credentials.
 - The setup is verified on Docker Desktop only (see Prerequisites).
