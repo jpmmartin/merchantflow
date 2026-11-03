@@ -88,3 +88,21 @@ export async function revokeActiveUserSession(
     .executeTakeFirst();
   return result.numUpdatedRows === 1n;
 }
+
+/**
+ * Revokes every active session of a user and returns how many it revoked.
+ * Sessions that are already revoked keep their original time. Pass the
+ * transaction that disables the user, so both commit together.
+ */
+export async function revokeActiveSessionsOfUser(
+  db: Database,
+  change: { readonly userId: string; readonly revokedAt: Date },
+): Promise<number> {
+  const result = await db
+    .updateTable('user_sessions')
+    .set({ revoked_at: change.revokedAt })
+    .where('user_id', '=', change.userId)
+    .where('revoked_at', 'is', null)
+    .executeTakeFirst();
+  return Number(result.numUpdatedRows);
+}

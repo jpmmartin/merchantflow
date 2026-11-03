@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { Navigate, Route, Routes, useNavigate } from 'react-router';
 import {
   fetchCurrentPrincipal,
   logOut,
@@ -8,9 +9,13 @@ import {
 import { ApiError, onUnauthorized } from './api/client';
 import { ErrorAlert } from './components/ErrorAlert';
 import { Layout } from './components/Layout';
-import type { Screen } from './components/navigation';
-import { HomePage } from './pages/HomePage';
+import { homePathFor } from './components/navigation';
+import { AccountPage } from './pages/AccountPage';
+import { CreateMerchantPage } from './pages/CreateMerchantPage';
 import { LoginPage } from './pages/LoginPage';
+import { MerchantDetailPage } from './pages/MerchantDetailPage';
+import { MerchantsPage } from './pages/MerchantsPage';
+import { NotFoundPage } from './pages/NotFoundPage';
 import {
   clearSessionToken,
   readSessionToken,
@@ -35,9 +40,50 @@ function initialState(): AppState {
     : { kind: 'loading' };
 }
 
+/**
+ * The screens of a principal. The platform administrator gets the merchant
+ * list, the create form, and any merchant's page; a merchant user gets only
+ * its own merchant's page, and every other path leads there.
+ */
+function SignedInRoutes({
+  principal,
+}: {
+  readonly principal: CurrentPrincipal;
+}) {
+  const home = homePathFor(principal);
+  if (principal.role === 'PLATFORM_ADMIN') {
+    return (
+      <Routes>
+        <Route path="/" element={<Navigate to={home} replace />} />
+        <Route path="/merchants" element={<MerchantsPage />} />
+        <Route path="/merchants/new" element={<CreateMerchantPage />} />
+        <Route
+          path="/merchants/:merchantId"
+          element={<MerchantDetailPage principal={principal} />}
+        />
+        <Route
+          path="/account"
+          element={<AccountPage principal={principal} />}
+        />
+        <Route path="*" element={<NotFoundPage homePath={home} />} />
+      </Routes>
+    );
+  }
+  return (
+    <Routes>
+      <Route
+        path="/merchants/:merchantId"
+        element={<MerchantDetailPage principal={principal} />}
+      />
+      <Route path="/account" element={<AccountPage principal={principal} />} />
+      <Route path="*" element={<Navigate to={home} replace />} />
+    </Routes>
+  );
+}
+
 export function App() {
+  const navigate = useNavigate();
   const [state, setState] = useState<AppState>(initialState);
-  const [screen, setScreen] = useState<Screen>('home');
   const [loggingOut, setLoggingOut] = useState(false);
   const [logOutError, setLogOutError] = useState<unknown>(undefined);
 
@@ -69,7 +115,6 @@ export function App() {
 
   function handleSignedIn(result: LoginResult) {
     storeSessionToken(result.token);
-    setScreen('home');
     void loadPrincipal();
   }
 
@@ -80,6 +125,7 @@ export function App() {
       await logOut();
       clearSessionToken();
       setState({ kind: 'signed-out', notice: 'You have signed out.' });
+      void navigate('/', { replace: true });
     } catch (error) {
       if (!(error instanceof ApiError && error.status === 401)) {
         setLogOutError(error);
@@ -127,13 +173,11 @@ export function App() {
       return (
         <Layout
           principal={state.principal}
-          screen={screen}
-          onNavigate={setScreen}
           onLogOut={() => void handleLogOut()}
           loggingOut={loggingOut}
         >
           <ErrorAlert error={logOutError} />
-          {screen === 'home' ? <HomePage principal={state.principal} /> : null}
+          <SignedInRoutes principal={state.principal} />
         </Layout>
       );
   }

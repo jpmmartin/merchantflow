@@ -1,26 +1,33 @@
-import type { Role } from '../api/auth';
-
-/** A screen the navigation bar can open. Only screens that exist are listed. */
-export type Screen = 'home';
+import type { CurrentPrincipal, Role } from '../api/auth';
 
 export interface NavigationEntry {
-  readonly screen: Screen;
+  /** Path the entry opens. */
+  readonly to: string;
   readonly label: string;
 }
 
-const HOME: NavigationEntry = { screen: 'home', label: 'Home' };
+/** The page a principal lands on after sign-in. */
+export function homePathFor(principal: CurrentPrincipal): string {
+  return principal.merchant_id === null
+    ? '/merchants'
+    : `/merchants/${principal.merchant_id}`;
+}
 
 /**
- * The navigation entries of a role. Platform and merchant roles get separate
- * lists, so screens of one kind never appear for the other.
+ * The navigation entries of a principal. Platform and merchant roles get
+ * separate lists, so screens of one kind never appear for the other, and only
+ * screens that exist are listed.
  */
-export function navigationFor(role: Role): readonly NavigationEntry[] {
-  switch (role) {
+export function navigationFor(
+  principal: CurrentPrincipal,
+): readonly NavigationEntry[] {
+  const account: NavigationEntry = { to: '/account', label: 'Account' };
+  switch (principal.role) {
     case 'PLATFORM_ADMIN':
-      return [HOME];
+      return [{ to: '/merchants', label: 'Merchants' }, account];
     case 'MERCHANT_ADMIN':
     case 'MERCHANT_READ_ONLY':
-      return [HOME];
+      return [{ to: homePathFor(principal), label: 'My merchant' }, account];
   }
 }
 
@@ -34,4 +41,9 @@ export function roleLabel(role: Role): string {
     case 'MERCHANT_READ_ONLY':
       return 'Merchant read-only';
   }
+}
+
+/** Whether a role may create and disable users and issue and revoke keys. */
+export function canManageAccess(role: Role): boolean {
+  return role === 'PLATFORM_ADMIN' || role === 'MERCHANT_ADMIN';
 }

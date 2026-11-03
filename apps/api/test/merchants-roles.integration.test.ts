@@ -106,7 +106,7 @@ const ENDPOINTS: readonly EndpointCase[] = [
       }),
     expected: {
       PLATFORM_ADMIN: 201,
-      MERCHANT_ADMIN: 403,
+      MERCHANT_ADMIN: 201,
       MERCHANT_READ_ONLY: 403,
       NONE: 401,
     },
@@ -120,7 +120,7 @@ const ENDPOINTS: readonly EndpointCase[] = [
       ),
     expected: {
       PLATFORM_ADMIN: 200,
-      MERCHANT_ADMIN: 403,
+      MERCHANT_ADMIN: 200,
       MERCHANT_READ_ONLY: 403,
       NONE: 401,
     },

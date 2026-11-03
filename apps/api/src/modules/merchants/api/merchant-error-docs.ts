@@ -2,7 +2,7 @@
 export const UNAUTHENTICATED_DOC = {
   status: 401,
   description:
-    'UNAUTHENTICATED: the API key is missing, malformed, unknown, wrong, or revoked.',
+    'UNAUTHENTICATED: the API key or session token is missing, malformed, unknown, wrong, revoked, or expired, or the user is disabled.',
 } as const;
 
 export const INSUFFICIENT_ROLE_DOC = {

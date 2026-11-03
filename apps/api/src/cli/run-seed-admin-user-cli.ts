@@ -1,4 +1,4 @@
-import { randomBytes, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import {
   describeDatabaseFailure,
   withTryAdvisoryLock,
@@ -8,6 +8,7 @@ import type { INestApplicationContext } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { CreateUserService } from '../modules/auth/application/create-user.service.js';
 import { FindPlatformUserService } from '../modules/auth/application/find-platform-user.service.js';
+import { generatePassword } from '../modules/auth/application/password-hash.js';
 import type { Env } from '../modules/config/env.schema.js';
 import { DATABASE } from '../modules/database/database.module.js';
 import {
@@ -23,9 +24,6 @@ import {
 export const DEFAULT_SEED_ADMIN_EMAIL = 'admin@merchantflow.test';
 
 const SEED_ADMIN_DISPLAY_NAME = 'Platform Administrator';
-
-/** 18 random bytes, printed as 24 base64url characters (144 bits). */
-const GENERATED_PASSWORD_BYTES = 18;
 
 type SeedUserOutcome =
   | {
@@ -66,9 +64,7 @@ async function seedPlatformUser(
           createdAt: existing.createdAt,
         };
       }
-      const password = randomBytes(GENERATED_PASSWORD_BYTES).toString(
-        'base64url',
-      );
+      const password = generatePassword();
       const created = await context.get(CreateUserService).execute({
         actor: { actorType: 'SYSTEM', actorId: SEED_ACTOR_ID },
         email,

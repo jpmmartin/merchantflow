@@ -5,6 +5,10 @@ import {
 } from '@merchantflow/domain';
 import { z } from 'zod';
 import { MERCHANT_API_KEY_ROLES } from '../../auth/application/api-key-scope.js';
+import {
+  EMAIL_MAX_LENGTH,
+  normalizeEmail,
+} from '../../auth/application/user-email.js';
 import { decodeMerchantCursor } from './merchant-cursor.js';
 
 /** Largest page a list request may ask for. */
@@ -32,6 +36,7 @@ const currencyCode = z.enum(SUPPORTED_CURRENCIES);
 
 export const merchantIdParamSchema = z.uuid();
 export const apiKeyIdParamSchema = z.uuid();
+export const userIdParamSchema = z.uuid();
 
 export const createMerchantSchema = z.strictObject({
   legal_name: legalName.describe('Legal name of the business.'),
@@ -187,3 +192,87 @@ export const revokedApiKeyResponseSchema = z.object({
 });
 
 export type RevokedApiKeyResponse = z.infer<typeof revokedApiKeyResponseSchema>;
+
+export const apiKeyResponseSchema = z.object({
+  id: z.uuid().describe('Identifier of the key, used to revoke it.'),
+  merchant_id: z.uuid(),
+  role: z.enum(MERCHANT_API_KEY_ROLES),
+  created_at: timestamp,
+  revoked_at: timestamp
+    .nullable()
+    .describe('When the key was revoked; null while it is active.'),
+});
+
+export type ApiKeyResponse = z.infer<typeof apiKeyResponseSchema>;
+
+export const apiKeyListResponseSchema = z.object({
+  data: z
+    .array(apiKeyResponseSchema)
+    .describe(
+      'Every key of the merchant, revoked ones included, oldest first.',
+    ),
+});
+
+export type ApiKeyListResponse = z.infer<typeof apiKeyListResponseSchema>;
+
+/**
+ * A new merchant user. The email is checked with the rule of the users table,
+ * so PostgreSQL is never the first to refuse it; case does not matter, and it
+ * is stored in lower case. There is no role and no password: every merchant
+ * user is `MERCHANT_ADMIN`, and the server generates the initial password.
+ */
+export const createMerchantUserSchema = z.strictObject({
+  email: z
+    .string()
+    .min(1)
+    .max(EMAIL_MAX_LENGTH)
+    .refine((value) => normalizeEmail(value) !== undefined, {
+      message: 'Invalid email address.',
+    })
+    .describe(
+      'Email the user signs in with. Unique across the platform; stored in lower case.',
+    ),
+  display_name: displayName.describe('Name shown for the user.'),
+});
+
+export type CreateMerchantUserBody = z.infer<typeof createMerchantUserSchema>;
+
+export const merchantUserResponseSchema = z.object({
+  id: z.uuid().describe('Identifier of the user, used to disable it.'),
+  merchant_id: z.uuid(),
+  email: z.string(),
+  display_name: z.string(),
+  role: z.enum(MERCHANT_API_KEY_ROLES),
+  enabled: z
+    .boolean()
+    .describe('A disabled user cannot sign in and has no active session.'),
+  created_at: timestamp,
+  updated_at: timestamp,
+});
+
+export type MerchantUserResponse = z.infer<typeof merchantUserResponseSchema>;
+
+export const createdMerchantUserResponseSchema =
+  merchantUserResponseSchema.extend({
+    initial_password: z
+      .string()
+      .describe(
+        'Generated password of the user. It is shown only in this response and cannot be retrieved again.',
+      ),
+  });
+
+export type CreatedMerchantUserResponse = z.infer<
+  typeof createdMerchantUserResponseSchema
+>;
+
+export const merchantUserListResponseSchema = z.object({
+  data: z
+    .array(merchantUserResponseSchema)
+    .describe(
+      'Every user of the merchant, disabled ones included, oldest first.',
+    ),
+});
+
+export type MerchantUserListResponse = z.infer<
+  typeof merchantUserListResponseSchema
+>;

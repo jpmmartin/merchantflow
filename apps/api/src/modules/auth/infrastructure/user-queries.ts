@@ -97,3 +97,62 @@ export async function findOldestPlatformUser(
     .executeTakeFirst();
   return row === undefined ? undefined : toUser(row);
 }
+
+/**
+ * Returns the users of a merchant, oldest first, ordered by creation time and
+ * then id.
+ */
+export async function listUsersOfMerchant(
+  db: Database,
+  merchantId: string,
+): Promise<User[]> {
+  const rows = await db
+    .selectFrom('users')
+    .selectAll()
+    .where('merchant_id', '=', merchantId)
+    .orderBy('created_at')
+    .orderBy('id')
+    .execute();
+  return rows.map(toUser);
+}
+
+/**
+ * Returns the user with the given id only if it belongs to the merchant, or
+ * `undefined`.
+ */
+export async function findUserOfMerchant(
+  db: Database,
+  key: { readonly id: string; readonly merchantId: string },
+): Promise<User | undefined> {
+  const row = await db
+    .selectFrom('users')
+    .selectAll()
+    .where('id', '=', key.id)
+    .where('merchant_id', '=', key.merchantId)
+    .executeTakeFirst();
+  return row === undefined ? undefined : toUser(row);
+}
+
+/**
+ * Disables a user of a merchant only if it is still enabled, and returns the
+ * updated user, or `undefined` when no enabled user of that merchant has the
+ * id. Of two concurrent calls exactly one gets the user back.
+ */
+export async function disableEnabledUser(
+  db: Database,
+  change: {
+    readonly id: string;
+    readonly merchantId: string;
+    readonly updatedAt: Date;
+  },
+): Promise<User | undefined> {
+  const row = await db
+    .updateTable('users')
+    .set({ enabled: false, updated_at: change.updatedAt })
+    .where('id', '=', change.id)
+    .where('merchant_id', '=', change.merchantId)
+    .where('enabled', '=', true)
+    .returningAll()
+    .executeTakeFirst();
+  return row === undefined ? undefined : toUser(row);
+}

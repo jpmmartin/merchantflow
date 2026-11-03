@@ -12,6 +12,8 @@ export interface TenantResources {
   readonly apiKeyId: string;
   /** Identifier of a payment intent that belongs to the merchant. */
   readonly paymentIntentId: string;
+  /** Identifier of a user that belongs to the merchant. */
+  readonly userId: string;
 }
 
 /** A request a route entry builds for a set of resources. */
@@ -76,7 +78,22 @@ export interface CommandRoute {
   readonly created: number;
 }
 
-export type TenantRoute = ResourceRoute | CollectionRoute | CommandRoute;
+/**
+ * A route that acts only on the credential of the request and names no
+ * merchant or resource, such as signing out. There is no 404 to compare: the
+ * suite checks that a merchant key gets the declared answer whatever the
+ * request names, and that nothing changes.
+ */
+export interface SelfRoute {
+  readonly kind: 'self';
+  readonly route: string;
+  readonly request: (resources: TenantResources) => BuiltRequest;
+  /** What a merchant key gets for a valid request. */
+  readonly merchantKey: number;
+}
+
+export type TenantRoute =
+  ResourceRoute | CollectionRoute | CommandRoute | SelfRoute;
 
 export const TENANT_ROUTES: readonly TenantRoute[] = [
   {
@@ -152,6 +169,58 @@ export const TENANT_ROUTES: readonly TenantRoute[] = [
     nested: true,
     platformExisting: 200,
     platformMissing: 404,
+  },
+  {
+    kind: 'resource',
+    route: 'GET /merchants/:id/api-keys',
+    request: (r) => ({ path: `/merchants/${r.merchantId}/api-keys` }),
+    platformExisting: 200,
+    platformMissing: 404,
+  },
+  {
+    kind: 'resource',
+    route: 'POST /merchants/:id/users',
+    request: (r) => ({
+      path: `/merchants/${r.merchantId}/users`,
+      body: {
+        email: `tenant-user-${randomUUID()}@example.test`,
+        display_name: 'Tenant User',
+      },
+    }),
+    platformExisting: 201,
+    platformMissing: 404,
+  },
+  {
+    kind: 'resource',
+    route: 'GET /merchants/:id/users',
+    request: (r) => ({ path: `/merchants/${r.merchantId}/users` }),
+    platformExisting: 200,
+    platformMissing: 404,
+  },
+  {
+    kind: 'resource',
+    route: 'POST /merchants/:id/users/:userId/disable',
+    request: (r) => ({
+      path: `/merchants/${r.merchantId}/users/${r.userId}/disable`,
+    }),
+    nested: true,
+    platformExisting: 200,
+    platformMissing: 404,
+  },
+  {
+    // The caller describes itself; an API key's description holds its own
+    // merchant and nothing of another.
+    kind: 'collection',
+    route: 'GET /auth/me',
+    request: () => ({ path: '/auth/me' }),
+  },
+  {
+    // Signing out ends the session of the request; an API key is refused
+    // and stays valid.
+    kind: 'self',
+    route: 'POST /auth/logout',
+    request: () => ({ path: '/auth/logout' }),
+    merchantKey: 403,
   },
   {
     kind: 'command',

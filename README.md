@@ -8,7 +8,7 @@ MerchantFlow is a payment orchestration reference platform built as a modular mo
 
 Today the repository contains the runnable foundation only:
 
-- a pnpm workspace with a NestJS API (`apps/api`), a PostgreSQL access package (`packages/database`), and a web frontend (`apps/web`, React, Vite, and Bootstrap 5) with sign-in and sign-out (see Web frontend);
+- a pnpm workspace with a NestJS API (`apps/api`), a PostgreSQL access package (`packages/database`), and a web frontend (`apps/web`, React, Vite, and Bootstrap 5) with sign-in, merchant management, and the users and API keys of each merchant (see Web frontend);
 - liveness and readiness endpoints, `GET /health/live` and `GET /health/ready`;
 - validated environment configuration that stops the API at startup when it is invalid;
 - structured JSON logs with a correlation ID on every request;
@@ -18,7 +18,7 @@ Today the repository contains the runnable foundation only:
 - API keys: 256 bits of randomness, only a lookup identifier and a SHA-256 hash stored, and an audit event for each issuance and revocation;
 - request authentication: a global guard checks the `Authorization: Bearer <token>` header, an API key or a user session token, against the stored hash on every request, with deny-by-default routing and role checks (see Authentication);
 - user sign-in: `POST /api/v1/auth/login` with an email and a password (scrypt hashes only), `POST /api/v1/auth/logout`, and `GET /api/v1/auth/me`;
-- merchant endpoints under `/api/v1/merchants`: create, read, list with stable pagination, update, change status, and issue and revoke API keys, each with role rules, tenant isolation, and an audit event (see Merchant endpoints);
+- merchant endpoints under `/api/v1/merchants`: create, read, list with stable pagination, update, change status, list, issue, and revoke API keys, and create, list, and disable merchant users, each with role rules, tenant isolation, and an audit event for each change (see Merchant endpoints);
 - payment intent creation, `POST /api/v1/payment-intents`, with a required `Idempotency-Key` and protection against a second intent for the same merchant order (see Payment intents); nothing is charged;
 - payment intent retrieval, `GET /api/v1/payment-intents/{id}`, scoped to the merchant of the key (see Payment intents);
 - a development seed, `pnpm db:seed`, that creates the first platform administrator key and the platform administrator user (see Demonstration: two merchants, neither sees the other, and Web frontend);
@@ -149,7 +149,7 @@ Outside production (`NODE_ENV` other than `production`) the API serves its OpenA
 
 ## Merchant endpoints
 
-All of them need an API key (see Authentication) and use `snake_case` fields. Merchants start in `DRAFT`; the allowed status changes are `DRAFT` to `ACTIVE`, `ACTIVE` to `SUSPENDED`, and `SUSPENDED` to `ACTIVE`.
+All of them need an API key or a session token (see Authentication) and use `snake_case` fields. Merchants start in `DRAFT`; the allowed status changes are `DRAFT` to `ACTIVE`, `ACTIVE` to `SUSPENDED`, and `SUSPENDED` to `ACTIVE`.
 
 | Endpoint                                                | `PLATFORM_ADMIN` | `MERCHANT_ADMIN`            | `MERCHANT_READ_ONLY` |
 | ------------------------------------------------------- | ---------------- | --------------------------- | -------------------- |
@@ -158,16 +158,24 @@ All of them need an API key (see Authentication) and use `snake_case` fields. Me
 | `GET /api/v1/merchants/{id}`                            | any merchant     | its own merchant            | its own merchant     |
 | `PATCH /api/v1/merchants/{id}`                          | five profile fields | `display_name`, `industry` of its own | 403         |
 | `POST /api/v1/merchants/{id}/status`                    | changes status   | 403                         | 403                  |
-| `POST /api/v1/merchants/{id}/api-keys`                  | issues a key     | 403                         | 403                  |
-| `POST /api/v1/merchants/{id}/api-keys/{apiKeyId}/revoke` | revokes a key   | 403                         | 403                  |
+| `GET /api/v1/merchants/{id}/api-keys`                   | lists the keys   | of its own merchant         | of its own merchant  |
+| `POST /api/v1/merchants/{id}/api-keys`                  | issues a key     | issues a key of its own     | 403                  |
+| `POST /api/v1/merchants/{id}/api-keys/{apiKeyId}/revoke` | revokes a key   | revokes a key of its own    | 403                  |
+| `POST /api/v1/merchants/{id}/users`                     | creates a user   | creates a user of its own   | 403                  |
+| `GET /api/v1/merchants/{id}/users`                      | lists the users  | of its own merchant         | of its own merchant  |
+| `POST /api/v1/merchants/{id}/users/{userId}/disable`    | disables a user  | disables a user of its own  | 403                  |
 
 - A merchant key that names any merchant other than its own gets `404 NOT_FOUND` before any role check, and the answer is the same as for a merchant that does not exist. For its own merchant, a forbidden operation, field, or status change is `403 INSUFFICIENT_ROLE` and nothing changes, also when the merchant is suspended. A merchant administrator may still edit `display_name` and `industry` while its merchant is suspended.
 - A platform administrator updates `legal_name`, `display_name`, `business_type`, `industry`, and `country_code`. `default_currency` is fixed when the merchant is created, and the status changes only through `POST .../status`.
 - `default_currency` accepts only a supported currency, which is `USD` for now (the OpenAPI document lists the accepted codes). Any other code, including a well-formed one such as `EUR`, is a `400 VALIDATION_FAILED` with an issue on `default_currency` and the rule code `invalid_value`, and nothing is stored.
 - Request bodies and query strings are strict: an unknown field is a `400 VALIDATION_FAILED`.
-- Creating a merchant does not issue a key. `POST .../api-keys` with `{"role": "MERCHANT_ADMIN"}` or `{"role": "MERCHANT_READ_ONLY"}` returns the key once, with `Cache-Control: no-store`; it is stored only as a hash and cannot be retrieved again. A revoked key stops working with its next request.
+- Creating a merchant does not issue a key. `POST .../api-keys` with `{"role": "MERCHANT_ADMIN"}` or `{"role": "MERCHANT_READ_ONLY"}` returns the key once, with `Cache-Control: no-store`; it is stored only as a hash and cannot be retrieved again. A revoked key stops working with its next request. A key always has a merchant role: no route issues a `PLATFORM_ADMIN` key.
+- `GET .../api-keys` returns `{"data": [...]}` with every key of the merchant, revoked ones included, oldest first: `id`, `merchant_id`, `role`, `created_at`, and `revoked_at` (`null` while active). It never returns the key, its secret, its hash, or its lookup identifier.
+- `POST .../users` with `{"email": "...", "display_name": "..."}` creates an enabled user with the role `MERCHANT_ADMIN` (there is no role choice yet) and returns it with `initial_password`, a password of 24 characters generated by the server, once and with `Cache-Control: no-store`. The email is stored in lower case and is unique across the platform: a taken email is `409 USER_EMAIL_TAKEN`, which reveals that the address is registered. There is no password change yet, so the user keeps that password.
+- `GET .../users` returns `{"data": [...]}` with every user of the merchant, disabled ones included, oldest first, and never a password or its hash.
+- `POST .../users/{userId}/disable` disables the user and revokes all its sessions in the same transaction, so its token gets `401` at the next request and it can no longer sign in. A signed-in user cannot disable itself (`409 USER_SELF_DISABLE_NOT_ALLOWED`). Disabling a disabled user succeeds and changes nothing. There is no re-enable yet.
 - `GET /api/v1/merchants?limit=20&cursor=...` returns `{"data": [...], "next_cursor": "..."}` ordered by creation time and then id. `limit` is 1 to 100 (default 20). Pass `next_cursor` back unchanged as `cursor`; it is `null` on the last page. An invalid cursor is a `400`. A walk over the pages never repeats a merchant, and never skips one that existed when it began.
-- Every change writes one audit event in the same transaction, naming the API key that made it and the request's correlation ID. Updates record the previous and new values of the changed fields.
+- Every change writes one audit event in the same transaction, naming the API key or user that made it and the request's correlation ID (`USER_CREATED` and `USER_DISABLED` for users, with no password). Updates record the previous and new values of the changed fields.
 - The OpenAPI document (outside production) lists each endpoint with its roles, schemas, error responses, and the `bearer` security scheme.
 
 The first platform administrator key cannot be created through the API; `pnpm db:seed` creates it (see Demonstration).
@@ -304,7 +312,7 @@ curl -sS -w '\nHTTP %{http_code}\n' "http://127.0.0.1:3000/api/v1/merchants/$MER
 curl -sS -w '\nHTTP %{http_code}\n' "http://127.0.0.1:3000/api/v1/merchants/$MERCHANT_B_ID" -H "Authorization: Bearer $KEY_B"
 ```
 
-A merchant key also lists only its own merchant, and cannot change a status or issue keys (`403 INSUFFICIENT_ROLE`):
+A merchant key also lists only its own merchant, and cannot change a status (`403 INSUFFICIENT_ROLE`). A `MERCHANT_ADMIN` key may issue and revoke keys, but only of its own merchant and only with a merchant role:
 
 ```bash
 curl -sS -w '\nHTTP %{http_code}\n' "http://127.0.0.1:3000/api/v1/merchants" -H "Authorization: Bearer $KEY_A"
@@ -328,7 +336,12 @@ Alternatively, `docker compose down --volumes` followed by the Quick start gives
 
 ## Web frontend
 
-`apps/web` is a React and TypeScript single-page app, built with Vite and styled with plain Bootstrap 5 CSS. It calls the API from the browser through one client module (`apps/web/src/api/client.ts`) that sends the session token as `Authorization: Bearer <token>`. Today it has the sign-in screen, a home page that shows the signed-in user and role from `GET /auth/me`, and sign-out.
+`apps/web` is a React and TypeScript single-page app, built with Vite, routed with React Router, and styled with plain Bootstrap 5 CSS. It calls the API from the browser through one client module (`apps/web/src/api/client.ts`) that sends the session token as `Authorization: Bearer <token>`. It has:
+
+- sign-in and sign-out, and an Account page with the signed-in user and role from `GET /auth/me`;
+- for the platform administrator: the merchants list (`/merchants`, with **Load more** for the next page), the create form (`/merchants/new`), the activate, suspend, and reactivate buttons the current status allows, and each merchant's page (`/merchants/{id}`);
+- on a merchant's page: its users (create, list, disable with a confirmation) and its API keys (issue with a merchant role, list, revoke with a confirmation). A new user's password and a new key are shown once, with a copy button, and are forgotten when their dialog closes;
+- for a merchant user: only its own merchant's page, where it lands after sign-in, with no merchant list and no status buttons. Any other merchant's page shows the API's `404`.
 
 1. With the stack running and the dependencies installed (Quick start steps 1 and 2), apply the migrations and run the seed. The seed prints the administrator's email and a generated password **once**; store the password.
 
@@ -343,7 +356,8 @@ Alternatively, `docker compose down --volumes` followed by the Quick start gives
    docker compose exec dev pnpm dev:web
    ```
 
-3. Open <http://localhost:5173> and sign in with the seeded email (`admin@merchantflow.test` unless `SEED_ADMIN_EMAIL` says otherwise) and the printed password. The home page shows the user, the role, and no merchant. **Sign out** returns to the sign-in screen and revokes the session.
+3. Open <http://localhost:5173> and sign in with the seeded email (`admin@merchantflow.test` unless `SEED_ADMIN_EMAIL` says otherwise) and the printed password. The merchants list opens. **Sign out** returns to the sign-in screen and revokes the session.
+4. Create a merchant, activate it, open its page, and create a user. Copy the password from the dialog, sign out, and sign in as that user: its merchant's page opens, where it can issue and revoke keys and create and disable other users of the same merchant.
 
 Notes:
 
@@ -379,7 +393,7 @@ Users sign in with an email and a password:
 
 - `POST /api/v1/auth/login` with `{"email": "...", "password": "..."}` returns `{ token, expires_at, principal }`. The email is compared in lower case. An unknown email, a wrong password, and a disabled user all receive the same `401 INVALID_CREDENTIALS`, and each attempt costs the same scrypt comparison. The token is shown only in this response.
 - A session lasts 8 hours from sign-in and is never extended. Passwords are stored only as salted scrypt hashes; tokens only as SHA-256 hashes.
-- `POST /api/v1/auth/logout` revokes the session of the request (`204`); the token gets `401` afterwards. An API key gets `403 SESSION_REQUIRED` and stays valid.
+- `POST /api/v1/auth/logout` revokes the session of the request (`204`); the token gets `401` afterwards. An API key gets `403 SESSION_REQUIRED` and stays valid. Every role may call it and `GET /api/v1/auth/me`.
 - `GET /api/v1/auth/me` returns the caller: a user with its ID, display name, email, role, and merchant, or an API key with its ID, role, and merchant.
 - A signed-in user acts with the same role and merchant rules as an API key, and its actions record `actor_type` `USER` and the user's ID in the audit trail. Sign-in and sign-out are audited as `USER_SESSION_CREATED` and `USER_SESSION_REVOKED`.
 
@@ -411,9 +425,9 @@ The API reads its configuration from environment variables and refuses to start,
 
 - A request the JSON body parser rejects (malformed JSON, for instance) receives the standard error but writes no access log line.
 - No rate limit or input size limit beyond the parser's default exists yet, sign-in included. There is no password reset, email verification, or multi-factor authentication.
-- Only the platform administrator user exists: merchant users are planned. `GET /auth/me` and `POST /auth/logout` accept only the `PLATFORM_ADMIN` role for now. Only payment intent creation takes an idempotency key: creating a merchant twice creates two merchants.
+- Every merchant user is `MERCHANT_ADMIN`; there is no role choice, re-enabling, password change, or deletion of users yet, and the lists of a merchant's users and keys are not paginated. Platform users are created only by the seed. Only payment intent creation takes an idempotency key: creating a merchant twice creates two merchants.
 - There is no endpoint to list payment intents yet, nor to confirm one; idempotency records are kept and never deleted (no purge exists). `payment_intents` rejects deletes and changes of an intent's amount, currency, reference, or merchant through triggers that a database superuser or the table owner can still disable.
-- The other business endpoints are the merchant endpoints: there is no endpoint to list the keys of a merchant (a key can be revoked by the `id` returned when it was issued), and no platform key can be issued through the API; the development seed is the only way to create one, and a lost platform key is replaced by revoking it in the database (see Recover a lost platform key). Payment confirmation, processors, ledger, and dashboard are planned.
+- The other business endpoints are the merchant endpoints: no platform key can be issued through the API; the development seed is the only way to create one, and a lost platform key is replaced by revoking it in the database (see Recover a lost platform key). Payment confirmation, processors, ledger, and dashboard are planned.
 - The error responses of the health endpoints and of the unknown-route handler are not described in the OpenAPI document.
 - A merchant created or changed by a transaction that commits late can be missed by a list walk already past its position; the next walk shows it.
 - `api_keys` accepts only the `PLATFORM_ADMIN`, `MERCHANT_ADMIN`, and `MERCHANT_READ_ONLY` roles; rows can be revoked once and never removed or reactivated, through triggers that a database superuser or the table owner can still disable.

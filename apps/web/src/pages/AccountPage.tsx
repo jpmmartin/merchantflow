@@ -1,12 +1,12 @@
 import type { CurrentPrincipal } from '../api/auth';
 import { roleLabel } from '../components/navigation';
 
-interface HomePageProps {
+interface AccountPageProps {
   readonly principal: CurrentPrincipal;
 }
 
 /** Shows who is signed in, as `GET /auth/me` reported it. */
-export function HomePage({ principal }: HomePageProps) {
+export function AccountPage({ principal }: AccountPageProps) {
   return (
     <div className="card">
       <div className="card-body">

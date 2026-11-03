@@ -6,7 +6,10 @@ import {
   auditActorOf,
   type Principal,
 } from '../../auth/application/principal.js';
-import { canAddressMerchant } from './merchant-access.js';
+import {
+  canAddressMerchant,
+  canManageMerchantAccess,
+} from './merchant-access.js';
 
 export interface IssueMerchantApiKeyCommand {
   readonly principal: Principal;
@@ -25,10 +28,12 @@ export type IssueMerchantApiKeyResult =
   | { readonly ok: false; readonly code: 'MERCHANT_NOT_FOUND' | 'FORBIDDEN' };
 
 /**
- * Issues an API key for a merchant. Only a platform key may do it. The merchant
- * must be addressable by the caller first (otherwise "not found", whatever the
- * role). The key and its audit event are written by `IssueApiKeyService` in one
- * transaction, with the requesting key as the actor.
+ * Issues an API key with a merchant role for a merchant. The platform
+ * administrator may do it for any merchant, and `MERCHANT_ADMIN` for its own;
+ * the role of the new key is always a merchant role. The merchant must be
+ * addressable by the caller first (otherwise "not found", whatever the role).
+ * The key and its audit event are written by `IssueApiKeyService` in one
+ * transaction, with the requester as the actor.
  */
 @Injectable()
 export class IssueMerchantApiKeyService {
@@ -41,7 +46,7 @@ export class IssueMerchantApiKeyService {
     if (!canAddressMerchant(principal, command.merchantId)) {
       return { ok: false, code: 'MERCHANT_NOT_FOUND' };
     }
-    if (principal.kind !== 'PLATFORM') {
+    if (!canManageMerchantAccess(principal)) {
       return { ok: false, code: 'FORBIDDEN' };
     }
 

@@ -27,6 +27,9 @@ export const SCRYPT_PARAMETERS = {
 /** Random salt per hash; Node's documentation recommends at least 16 bytes. */
 const SALT_BYTES = 16;
 
+/** Random bytes of a generated password: 24 base64url characters (144 bits). */
+const GENERATED_PASSWORD_BYTES = 18;
+
 /** Length of the derived key. */
 const KEY_BYTES = 32;
 
@@ -146,4 +149,13 @@ export async function verifyPassword(
   const { parameters, salt, key } = parseStoredHash(stored);
   const derived = await deriveKey(password, salt, parameters, key.length);
   return derived.length === key.length && timingSafeEqual(derived, key);
+}
+
+/**
+ * Generates a password of 24 base64url characters from 18 random bytes (144
+ * bits), for an account whose first password nobody chooses: the seeded
+ * administrator and every user created through the API.
+ */
+export function generatePassword(): string {
+  return randomBytes(GENERATED_PASSWORD_BYTES).toString('base64url');
 }

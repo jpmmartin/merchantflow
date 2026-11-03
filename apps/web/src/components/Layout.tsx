@@ -1,11 +1,10 @@
 import type { ReactNode } from 'react';
+import { NavLink } from 'react-router';
 import type { CurrentPrincipal } from '../api/auth';
-import { navigationFor, roleLabel, type Screen } from './navigation';
+import { navigationFor, roleLabel } from './navigation';
 
 interface LayoutProps {
   readonly principal: CurrentPrincipal;
-  readonly screen: Screen;
-  readonly onNavigate: (screen: Screen) => void;
   readonly onLogOut: () => void;
   readonly loggingOut: boolean;
   readonly children: ReactNode;
@@ -14,8 +13,6 @@ interface LayoutProps {
 /** The signed-in frame: a navigation bar whose entries depend on the role. */
 export function Layout({
   principal,
-  screen,
-  onNavigate,
   onLogOut,
   loggingOut,
   children,
@@ -27,16 +24,17 @@ export function Layout({
         <div className="container">
           <span className="navbar-brand">MerchantFlow</span>
           <ul className="navbar-nav me-auto">
-            {navigationFor(principal.role).map((entry) => (
-              <li className="nav-item" key={entry.screen}>
-                <button
-                  type="button"
-                  className={`nav-link btn btn-link${entry.screen === screen ? ' active' : ''}`}
-                  aria-current={entry.screen === screen ? 'page' : undefined}
-                  onClick={() => onNavigate(entry.screen)}
+            {navigationFor(principal).map((entry) => (
+              <li className="nav-item" key={entry.to}>
+                <NavLink
+                  to={entry.to}
+                  end={entry.to !== '/merchants'}
+                  className={({ isActive }) =>
+                    `nav-link${isActive ? ' active' : ''}`
+                  }
                 >
                   {entry.label}
-                </button>
+                </NavLink>
               </li>
             ))}
           </ul>

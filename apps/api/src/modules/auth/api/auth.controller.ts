@@ -34,11 +34,15 @@ const UNAUTHENTICATED_DOC = {
 } as const;
 
 /**
- * Only platform users exist so far, so the session routes are limited to the
- * platform role. Opening them to merchant roles also means listing them in the
+ * Every role may describe itself and sign out. Neither route names a merchant:
+ * each acts only on the credential of the request, and both are listed in the
  * tenant isolation catalogue.
  */
-const SESSION_ROLES = ['PLATFORM_ADMIN'] as const;
+const SESSION_ROLES = [
+  'PLATFORM_ADMIN',
+  'MERCHANT_ADMIN',
+  'MERCHANT_READ_ONLY',
+] as const;
 
 @ApiTags('Authentication')
 @Controller('auth')
@@ -95,13 +99,12 @@ export class AuthController {
   @ApiOperation({
     summary: 'Sign out the current session',
     description:
-      'Roles: PLATFORM_ADMIN. Revokes the session whose token authenticated the request; the token gets 401 afterwards. It applies only to session tokens: an API key gets 403 SESSION_REQUIRED and stays valid.',
+      'Roles: PLATFORM_ADMIN, MERCHANT_ADMIN, MERCHANT_READ_ONLY. Revokes the session whose token authenticated the request; the token gets 401 afterwards. It applies only to session tokens: an API key gets 403 SESSION_REQUIRED and stays valid.',
   })
   @ApiResponse({ status: 204, description: 'The session is signed out.' })
   @ApiErrorResponses(UNAUTHENTICATED_DOC, {
     status: 403,
-    description:
-      'SESSION_REQUIRED: the request was made with an API key. INSUFFICIENT_ROLE: the role does not allow the route.',
+    description: 'SESSION_REQUIRED: the request was made with an API key.',
   })
   async logout(
     @CurrentPrincipal() principal: Principal,
@@ -118,17 +121,14 @@ export class AuthController {
   @ApiOperation({
     summary: 'Describe the caller',
     description:
-      'Roles: PLATFORM_ADMIN. Returns the principal of the request: the signed-in user with its display name, or the API key, with the role and the merchant.',
+      'Roles: PLATFORM_ADMIN, MERCHANT_ADMIN, MERCHANT_READ_ONLY. Returns the principal of the request: the signed-in user with its display name, or the API key, with the role and the merchant.',
   })
   @ApiResponse({
     status: 200,
     description: 'The principal of the request.',
     standardSchema: currentPrincipalResponseSchema,
   })
-  @ApiErrorResponses(UNAUTHENTICATED_DOC, {
-    status: 403,
-    description: 'INSUFFICIENT_ROLE: the role does not allow the route.',
-  })
+  @ApiErrorResponses(UNAUTHENTICATED_DOC)
   async me(
     @CurrentPrincipal() principal: Principal,
   ): Promise<CurrentPrincipalResponse> {

@@ -1,5 +1,13 @@
+import { randomUUID } from 'node:crypto';
 import type { DatabaseSchema } from '@merchantflow/database';
-import type { ApiMerchant, IssuedKey, MerchantApi } from './merchant-api.js';
+import { CreateUserService } from '../../src/modules/auth/application/create-user.service.js';
+import { generatePassword } from '../../src/modules/auth/application/password-hash.js';
+import {
+  API,
+  type ApiMerchant,
+  type IssuedKey,
+  type MerchantApi,
+} from './merchant-api.js';
 import {
   createIntent,
   intentBody,
@@ -8,7 +16,10 @@ import {
 } from './payment-intents.js';
 import type { TenantResources } from './tenant-routes.js';
 
-/** One merchant with a key of each merchant role and a key to be addressed. */
+/**
+ * One merchant with a key of each merchant role, a key to be addressed, a
+ * payment intent, and a user.
+ */
 export interface Tenant {
   readonly merchant: ApiMerchant;
   readonly admin: IssuedKey;
@@ -22,6 +33,8 @@ export interface Tenants {
   readonly a: Tenant;
   readonly b: Tenant;
   readonly platform: IssuedKey;
+  /** Identifier of a platform user, which no merchant path may reach. */
+  readonly platformUserId: string;
   /** Identifiers that belong to no tenant. */
   readonly missing: TenantResources;
 }
@@ -30,6 +43,7 @@ export interface Tenants {
 export const MISSING_MERCHANT_ID = '4c1f6a52-7d0e-4f0a-9d53-2f2b6a1c9e10';
 const MISSING_KEY_ID = '9b7d2c1e-3a54-4e8f-8f0b-6d1a5c2e7f43';
 const MISSING_PAYMENT_INTENT_ID = '2d8e5b7a-61c3-4f9d-a0e4-7b3c9f1d6a58';
+const MISSING_USER_ID = '6e2a9c4f-8b17-4d3e-b5a0-1f7c3d9e2b64';
 
 async function createTenant(api: MerchantApi): Promise<Tenant> {
   const merchant = await api.createActiveMerchant();
@@ -41,6 +55,18 @@ async function createTenant(api: MerchantApi): Promise<Tenant> {
     throw new Error(`Expected 201, got ${intent.status}`);
   }
   const paymentIntentId = (intent.body as ApiPaymentIntent).id;
+  const user = await api.post(
+    api.platform.key,
+    `${API}/merchants/${merchant.id}/users`,
+    {
+      email: `tenant-${randomUUID()}@example.test`,
+      display_name: 'Tenant User',
+    },
+  );
+  if (user.status !== 201) {
+    throw new Error(`Expected 201, got ${user.status}`);
+  }
+  const userId = (user.body as { id: string }).id;
   return {
     merchant,
     admin,
@@ -50,26 +76,39 @@ async function createTenant(api: MerchantApi): Promise<Tenant> {
       merchantId: merchant.id,
       apiKeyId: spare.id,
       paymentIntentId,
+      userId,
     },
   };
 }
 
 /**
  * Creates merchants A and B, each active and with keys for `MERCHANT_ADMIN`
- * and `MERCHANT_READ_ONLY`, and returns them with the platform key and the
- * identifiers of a merchant that does not exist.
+ * and `MERCHANT_READ_ONLY`, a payment intent, and a user, and a platform user,
+ * and returns them with the platform key and the identifiers of a merchant
+ * that does not exist.
  */
 export async function createTenants(api: MerchantApi): Promise<Tenants> {
   const a = await createTenant(api);
   const b = await createTenant(api);
+  const platformUser = await api.app.get(CreateUserService).execute({
+    actor: { actorType: 'SYSTEM', actorId: 'tenant-isolation-test' },
+    email: `platform-${randomUUID()}@example.test`,
+    displayName: 'Platform User',
+    scope: { kind: 'PLATFORM', role: 'PLATFORM_ADMIN' },
+    password: generatePassword(),
+    correlationId: randomUUID(),
+  });
+  if (!platformUser.ok) throw new Error('Expected the platform user');
   return {
     a,
     b,
     platform: api.platform,
+    platformUserId: platformUser.user.id,
     missing: {
       merchantId: MISSING_MERCHANT_ID,
       apiKeyId: MISSING_KEY_ID,
       paymentIntentId: MISSING_PAYMENT_INTENT_ID,
+      userId: MISSING_USER_ID,
     },
   };
 }

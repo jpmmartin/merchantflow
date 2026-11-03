@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Get,
   Header,
   HttpCode,
   Param,
@@ -18,6 +19,7 @@ import type { Principal } from '../../auth/application/principal.js';
 import { ApiErrorResponses } from '../../errors/api/api-error-responses.decorator.js';
 import { CorrelationId } from '../../logging/correlation-id.decorator.js';
 import { IssueMerchantApiKeyService } from '../application/issue-merchant-api-key.service.js';
+import { ListMerchantApiKeysService } from '../application/list-merchant-api-keys.service.js';
 import { RevokeMerchantApiKeyService } from '../application/revoke-merchant-api-key.service.js';
 import {
   INSUFFICIENT_ROLE_DOC,
@@ -27,15 +29,18 @@ import {
 } from './merchant-error-docs.js';
 import { toApiException } from './merchant-failures.js';
 import {
+  toApiKeyListResponse,
   toIssuedApiKeyResponse,
   toRevokedApiKeyResponse,
 } from './merchant.presenter.js';
 import {
   apiKeyIdParamSchema,
+  apiKeyListResponseSchema,
   issuedApiKeyResponseSchema,
   issueApiKeySchema,
   merchantIdParamSchema,
   revokedApiKeyResponseSchema,
+  type ApiKeyListResponse,
   type IssueApiKeyBody,
   type IssuedApiKeyResponse,
   type RevokedApiKeyResponse,
@@ -55,7 +60,30 @@ export class MerchantApiKeysController {
   constructor(
     private readonly issueApiKey: IssueMerchantApiKeyService,
     private readonly revokeApiKey: RevokeMerchantApiKeyService,
+    private readonly listApiKeys: ListMerchantApiKeysService,
   ) {}
+
+  @Get()
+  @Roles(ANY_ROLE)
+  @ApiOperation({
+    summary: 'List the API keys of a merchant',
+    description:
+      'Roles: PLATFORM_ADMIN for any merchant; MERCHANT_ADMIN and MERCHANT_READ_ONLY for their own. Lists every key, revoked ones included, oldest first, with its id, role, creation time, and revocation time. Never returns the key, its secret, its hash, or its lookup id. Another merchant is 404.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'The keys of the merchant.',
+    standardSchema: apiKeyListResponseSchema,
+  })
+  @ApiErrorResponses(VALIDATION_FAILED_DOC, UNAUTHENTICATED_DOC, NOT_FOUND_DOC)
+  async list(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', { schema: merchantIdParamSchema }) merchantId: string,
+  ): Promise<ApiKeyListResponse> {
+    const result = await this.listApiKeys.execute({ principal, merchantId });
+    if (!result.ok) throw toApiException(result.code);
+    return toApiKeyListResponse(result.apiKeys);
+  }
 
   @Post()
   @Roles(ANY_ROLE)
@@ -63,7 +91,7 @@ export class MerchantApiKeysController {
   @ApiOperation({
     summary: 'Issue an API key for a merchant',
     description:
-      'Roles: PLATFORM_ADMIN only. The response holds the key once; it is stored only as a hash and cannot be retrieved again. The response is not cacheable (Cache-Control: no-store). A merchant key gets 404 for another merchant and 403 for its own.',
+      'Roles: PLATFORM_ADMIN for any merchant; MERCHANT_ADMIN for its own. The role of the new key is MERCHANT_ADMIN or MERCHANT_READ_ONLY, never PLATFORM_ADMIN. The response holds the key once; it is stored only as a hash and cannot be retrieved again. The response is not cacheable (Cache-Control: no-store). A merchant role gets 404 for another merchant, and MERCHANT_READ_ONLY gets 403 for its own.',
   })
   @ApiResponse({
     status: 201,
@@ -99,7 +127,7 @@ export class MerchantApiKeysController {
   @ApiOperation({
     summary: 'Revoke an API key of a merchant',
     description:
-      'Roles: PLATFORM_ADMIN only. The key stops authenticating at its next request. Revoking a revoked key succeeds and changes nothing. A key of another merchant, a platform key, and an unknown id are 404. A merchant key gets 404 for another merchant and 403 for its own.',
+      'Roles: PLATFORM_ADMIN for any merchant; MERCHANT_ADMIN for its own, including the key it is using. The key stops authenticating at its next request. Revoking a revoked key succeeds and changes nothing. A key of another merchant, a platform key, and an unknown id are 404. A merchant role gets 404 for another merchant, and MERCHANT_READ_ONLY gets 403 for its own.',
   })
   @ApiResponse({
     status: 200,

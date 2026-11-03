@@ -496,7 +496,7 @@ describe('audit events and API keys of the merchant endpoints', () => {
       expect(response.status).toBe(400);
     });
 
-    it('does not let a merchant key revoke its own key', async () => {
+    it('lets a merchant admin key revoke its own key', async () => {
       const merchant = await api.createActiveMerchant();
       const admin = await api.keyFor(merchant.id, 'MERCHANT_ADMIN');
 
@@ -505,9 +505,9 @@ describe('audit events and API keys of the merchant endpoints', () => {
         `${API}/merchants/${merchant.id}/api-keys/${admin.id}/revoke`,
       );
 
-      expect(response.status).toBe(403);
+      expect(response.status).toBe(200);
       const still = await api.get(admin.key, `${API}/merchants/${merchant.id}`);
-      expect(still.status).toBe(200);
+      expect(still.status).toBe(401);
     });
   });
 

@@ -111,3 +111,21 @@ export async function findActivePlatformApiKey(
     .executeTakeFirst();
   return row === undefined ? undefined : toApiKey(row);
 }
+
+/**
+ * Returns the keys of a merchant, revoked ones included, oldest first, ordered
+ * by creation time and then id.
+ */
+export async function listApiKeysOfMerchant(
+  db: Database,
+  merchantId: string,
+): Promise<ApiKey[]> {
+  const rows = await db
+    .selectFrom('api_keys')
+    .selectAll()
+    .where('merchant_id', '=', merchantId)
+    .orderBy('created_at')
+    .orderBy('id')
+    .execute();
+  return rows.map(toApiKey);
+}

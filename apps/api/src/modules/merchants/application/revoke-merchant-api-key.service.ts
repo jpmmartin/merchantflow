@@ -6,7 +6,10 @@ import {
   auditActorOf,
   type Principal,
 } from '../../auth/application/principal.js';
-import { canAddressMerchant } from './merchant-access.js';
+import {
+  canAddressMerchant,
+  canManageMerchantAccess,
+} from './merchant-access.js';
 
 export interface RevokeMerchantApiKeyCommand {
   readonly principal: Principal;
@@ -34,9 +37,10 @@ export type RevokeMerchantApiKeyResult =
   | { readonly ok: false; readonly code: 'NOT_FOUND' | 'FORBIDDEN' };
 
 /**
- * Revokes a key of a merchant. Only a platform key may do it. The merchant must
- * be addressable by the caller first (otherwise "not found", whatever the
- * role), and the key must belong to that merchant: a key of another merchant,
+ * Revokes a key of a merchant. The platform administrator may do it for any
+ * merchant, and `MERCHANT_ADMIN` for its own, including the key it is using.
+ * The merchant must be addressable by the caller first (otherwise "not found",
+ * whatever the role), and the key must belong to that merchant: a key of another merchant,
  * a platform key, and an unknown id are all "not found". The revocation and
  * its audit event are written by `RevokeApiKeyService` in one transaction.
  * Revoking an already revoked key succeeds without a change.
@@ -55,7 +59,7 @@ export class RevokeMerchantApiKeyService {
     if (!canAddressMerchant(principal, command.merchantId)) {
       return { ok: false, code: 'NOT_FOUND' };
     }
-    if (principal.kind !== 'PLATFORM') {
+    if (!canManageMerchantAccess(principal)) {
       return { ok: false, code: 'FORBIDDEN' };
     }
 

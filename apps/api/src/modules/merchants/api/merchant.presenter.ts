@@ -2,9 +2,16 @@ import type { Merchant } from '@merchantflow/domain';
 import type { MerchantPage } from '../application/list-merchants.service.js';
 import type { RevokedMerchantApiKey } from '../application/revoke-merchant-api-key.service.js';
 import type { ApiKey } from '../../auth/application/api-key.js';
+import type { ApiKeySummary } from '../../auth/application/find-api-key.service.js';
+import type { UserSummary } from '../../auth/application/user.js';
 import { encodeMerchantCursor } from './merchant-cursor.js';
 import type {
+  ApiKeyListResponse,
+  ApiKeyResponse,
+  CreatedMerchantUserResponse,
   IssuedApiKeyResponse,
+  MerchantUserListResponse,
+  MerchantUserResponse,
   MerchantListResponse,
   MerchantResponse,
   RevokedApiKeyResponse,
@@ -66,4 +73,61 @@ export function toRevokedApiKeyResponse(
     created_at: apiKey.createdAt.toISOString(),
     revoked_at: apiKey.revokedAt.toISOString(),
   };
+}
+
+/** A merchant's key as a list shows it: no secret, hash, or lookup id. */
+export function toApiKeyResponse(apiKey: ApiKeySummary): ApiKeyResponse {
+  if (apiKey.scope.kind !== 'MERCHANT') {
+    throw new Error(`api key ${apiKey.id} is listed without a merchant`);
+  }
+  return {
+    id: apiKey.id,
+    merchant_id: apiKey.scope.merchantId,
+    role: apiKey.scope.role,
+    created_at: apiKey.createdAt.toISOString(),
+    revoked_at:
+      apiKey.revokedAt === null ? null : apiKey.revokedAt.toISOString(),
+  };
+}
+
+export function toApiKeyListResponse(
+  apiKeys: readonly ApiKeySummary[],
+): ApiKeyListResponse {
+  return { data: apiKeys.map(toApiKeyResponse) };
+}
+
+/** A merchant user, built field by field: no password hash. */
+export function toMerchantUserResponse(
+  user: UserSummary,
+): MerchantUserResponse {
+  if (user.scope.kind !== 'MERCHANT') {
+    throw new Error(`user ${user.id} is shown without a merchant`);
+  }
+  return {
+    id: user.id,
+    merchant_id: user.scope.merchantId,
+    email: user.email,
+    display_name: user.displayName,
+    role: user.scope.role,
+    enabled: user.enabled,
+    created_at: user.createdAt.toISOString(),
+    updated_at: user.updatedAt.toISOString(),
+  };
+}
+
+/** The response of a user creation: the user and its password, once. */
+export function toCreatedMerchantUserResponse(
+  user: UserSummary,
+  initialPassword: string,
+): CreatedMerchantUserResponse {
+  return {
+    ...toMerchantUserResponse(user),
+    initial_password: initialPassword,
+  };
+}
+
+export function toMerchantUserListResponse(
+  users: readonly UserSummary[],
+): MerchantUserListResponse {
+  return { data: users.map(toMerchantUserResponse) };
 }

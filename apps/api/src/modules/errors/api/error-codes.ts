@@ -13,6 +13,8 @@ export const ERROR_CODES = [
   'NOT_FOUND',
   'MERCHANT_TRANSITION_NOT_ALLOWED',
   'MERCHANT_STATUS_CONFLICT',
+  'USER_EMAIL_TAKEN',
+  'USER_SELF_DISABLE_NOT_ALLOWED',
   'IDEMPOTENCY_KEY_MISSING',
   'IDEMPOTENCY_KEY_INVALID',
   'IDEMPOTENCY_KEY_REUSED',
@@ -93,6 +95,18 @@ export const ERROR_DEFINITIONS: Readonly<Record<ErrorCode, ErrorDefinition>> = {
   MERCHANT_STATUS_CONFLICT: {
     status: 409,
     message: 'The merchant status was changed by another request.',
+  },
+  // Another user, of any merchant or of the platform, already signs in with
+  // this email, which is unique across the platform. The answer reveals that
+  // the address is registered.
+  USER_EMAIL_TAKEN: {
+    status: 409,
+    message: 'A user with this email already exists.',
+  },
+  // A signed-in user asked to disable itself, which would end its own access.
+  USER_SELF_DISABLE_NOT_ALLOWED: {
+    status: 409,
+    message: 'A user cannot disable itself.',
   },
   // A command was sent without the Idempotency-Key header it requires.
   IDEMPOTENCY_KEY_MISSING: {

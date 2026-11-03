@@ -6,7 +6,9 @@ export type MerchantFailureCode =
   | 'NOT_FOUND'
   | 'FORBIDDEN'
   | 'TRANSITION_NOT_ALLOWED'
-  | 'STATUS_CONFLICT';
+  | 'STATUS_CONFLICT'
+  | 'EMAIL_TAKEN'
+  | 'SELF_DISABLE';
 
 /**
  * The exception for a refused request. Both "not found" outcomes become the
@@ -24,5 +26,9 @@ export function toApiException(code: MerchantFailureCode): ApiException {
       return new ApiException('MERCHANT_TRANSITION_NOT_ALLOWED');
     case 'STATUS_CONFLICT':
       return new ApiException('MERCHANT_STATUS_CONFLICT');
+    case 'EMAIL_TAKEN':
+      return new ApiException('USER_EMAIL_TAKEN');
+    case 'SELF_DISABLE':
+      return new ApiException('USER_SELF_DISABLE_NOT_ALLOWED');
   }
 }

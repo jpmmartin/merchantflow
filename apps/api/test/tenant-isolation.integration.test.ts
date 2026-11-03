@@ -18,6 +18,7 @@ import {
   type CollectionRoute,
   type CommandRoute,
   type ResourceRoute,
+  type SelfRoute,
   type TenantResources,
   type TenantRoute,
 } from './support/tenant-routes.js';
@@ -60,6 +61,9 @@ const COLLECTION_ROUTES = TENANT_ROUTES.filter(
 const COMMAND_ROUTES = TENANT_ROUTES.filter(
   (entry): entry is CommandRoute => entry.kind === 'command',
 );
+const SELF_ROUTES = TENANT_ROUTES.filter(
+  (entry): entry is SelfRoute => entry.kind === 'self',
+);
 
 /** A name for an entry; routes that repeat are told apart by their body. */
 function labelOf(entry: TenantRoute): string {
@@ -67,6 +71,7 @@ function labelOf(entry: TenantRoute): string {
     merchantId: 'x',
     apiKeyId: 'y',
     paymentIntentId: 'z',
+    userId: 'w',
   }).body;
   return body === undefined
     ? entry.route
@@ -468,7 +473,7 @@ describe('tenant isolation', () => {
           }
         }
 
-        it('does not let the platform key reach a platform key through a merchant path', async () => {
+        it('does not let the platform key reach a platform key or user through a merchant path', async () => {
           const before = await snapshotDatabase(api);
 
           const response = await send(
@@ -477,6 +482,7 @@ describe('tenant isolation', () => {
             entry.request({
               ...tenants.a.resources,
               apiKeyId: tenants.platform.id,
+              userId: tenants.platformUserId,
             }),
           );
 
@@ -674,6 +680,47 @@ describe('tenant isolation', () => {
       expect(againFromA.text).toBe(fromA.text);
     });
   });
+
+  describe.each(SELF_ROUTES.map((entry) => [labelOf(entry), entry] as const))(
+    'own credential: %s',
+    (_label, entry) => {
+      for (const [from, to] of DIRECTIONS) {
+        for (const role of MERCHANT_ROLES) {
+          for (const selector of [undefined, ...ALL_SELECTORS]) {
+            const naming =
+              selector === undefined ? 'nothing else' : selector.name;
+            it(`${role} of ${from.toUpperCase()} naming ${to.toUpperCase()} through ${naming} gets the declared answer and changes nothing`, async () => {
+              const caller = tenants[from];
+              const target = tenants[to];
+              const built = entry.request(caller.resources);
+              const aimed =
+                selector === undefined
+                  ? { built, headers: {} }
+                  : selector.apply(
+                      splitRoute(entry.route).method,
+                      built,
+                      target.merchant.id,
+                    );
+              if (aimed === undefined) return;
+              const before = await snapshotDatabase(api);
+
+              const response = await send(
+                keyOf(caller, role),
+                entry.route,
+                aimed.built,
+                aimed.headers,
+              );
+
+              // A field the route does not define is invalid input (400).
+              expect([entry.merchantKey, 400]).toContain(response.status);
+              expect(response.text).not.toContain(target.merchant.id);
+              expectUnchanged(before, await snapshotDatabase(api), naming);
+            });
+          }
+        }
+      }
+    },
+  );
 
   describe('reads of an own resource that name another tenant', () => {
     const reads = RESOURCE_ROUTES.filter(

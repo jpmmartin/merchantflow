@@ -18,3 +18,20 @@ export function canAddressMerchant(
       return principal.merchantId === merchantId;
   }
 }
+
+/**
+ * Whether the caller may manage who can act for a merchant it can address:
+ * create and disable its users, and issue and revoke its API keys. The
+ * platform administrator may, and so may `MERCHANT_ADMIN` for its own
+ * merchant; `MERCHANT_READ_ONLY` may not. Call it only after
+ * `canAddressMerchant`, so another merchant is "not found" before any role
+ * check.
+ */
+export function canManageMerchantAccess(principal: Principal): boolean {
+  switch (principal.kind) {
+    case 'PLATFORM':
+      return true;
+    case 'MERCHANT':
+      return principal.role === 'MERCHANT_ADMIN';
+  }
+}
