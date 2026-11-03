@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { Server } from 'node:http';
-import type { INestApplication } from '@nestjs/common';
+import type { INestApplication, Type } from '@nestjs/common';
 import request from 'supertest';
 import { IssueApiKeyService } from '../../src/modules/auth/application/issue-api-key.service.js';
 import { parseApiKey } from '../../src/modules/auth/application/api-key-secret.js';
@@ -113,12 +113,19 @@ let merchantCounter = 0;
  * whole application on top of it, with a controllable clock and one platform
  * administrator key. Use one per test file (see `startApp`).
  */
-export async function startMerchantApi(): Promise<MerchantApi> {
+export async function startMerchantApi(
+  options: { readonly controllers?: Type[] } = {},
+): Promise<MerchantApi> {
   const postgres = await startMigratedPostgres();
   const clock = new ControllableClock();
   const { app, server, output, lines } = await startApp(
     postgres.connectionString,
-    { clock },
+    {
+      clock,
+      ...(options.controllers === undefined
+        ? {}
+        : { controllers: options.controllers }),
+    },
   );
   const responses: string[] = [];
   const issued: IssuedKey[] = [];
