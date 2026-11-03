@@ -1,4 +1,5 @@
-import { Controller, Get, ServiceUnavailableException } from '@nestjs/common';
+import type { ServerResponse } from 'node:http';
+import { Controller, Get, HttpStatus, Res } from '@nestjs/common';
 import {
   GetLivenessService,
   type LivenessReport,
@@ -21,13 +22,18 @@ export class HealthController {
   }
 
   @Get('ready')
-  async ready(): Promise<ReadinessReport> {
+  async ready(
+    @Res({ passthrough: true }) response: ServerResponse,
+  ): Promise<ReadinessReport> {
     const report = await this.getReadiness.execute();
     switch (report.status) {
       case 'ready':
         return report;
       case 'unavailable':
-        throw new ServiceUnavailableException(report);
+        // Probes read the status and this fixed body, which is not the API
+        // error shape, so the report is returned with a 503 instead of thrown.
+        response.statusCode = HttpStatus.SERVICE_UNAVAILABLE;
+        return report;
     }
   }
 }

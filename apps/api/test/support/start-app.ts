@@ -1,8 +1,10 @@
 import type { Server } from 'node:http';
-import type { INestApplication } from '@nestjs/common';
+import type { INestApplication, Type } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { Logger } from 'nestjs-pino';
 import { vi } from 'vitest';
+import { configureApp } from '../../src/app.setup.js';
+import { ApiHttpAdapter } from '../../src/modules/errors/api/api-http-adapter.js';
 import type { Clock } from '../../src/modules/clock/clock.js';
 
 export interface LogLine {
@@ -14,7 +16,7 @@ export interface LogLine {
 
 /**
  * Creates the whole application against a database URL and captures its log
- * output. The configuration is validated when the application module is
+ * output. `controllers` adds routes that exist only in a test. The configuration is validated when the application module is
  * imported, so the module is imported only after the environment is set.
  *
  * Use one application per test file: `nestjs-pino` keeps a logger for the whole
@@ -23,7 +25,10 @@ export interface LogLine {
  */
 export async function startApp(
   databaseUrl: string,
-  options: { readonly clock?: Clock } = {},
+  options: {
+    readonly clock?: Clock;
+    readonly controllers?: Type[];
+  } = {},
 ) {
   vi.stubEnv('DATABASE_URL', databaseUrl);
   vi.stubEnv('LOG_LEVEL', 'info');
@@ -33,18 +38,22 @@ export async function startApp(
     import('../../src/modules/clock/clock.js'),
   ]);
   const output: string[] = [];
-  let builder = Test.createTestingModule({ imports: [AppModule] })
+  let builder = Test.createTestingModule({
+    imports: [AppModule],
+    controllers: options.controllers ?? [],
+  })
     .overrideProvider(LOG_DESTINATION)
     .useValue({ write: (chunk: string) => void output.push(chunk) });
   if (options.clock !== undefined) {
     builder = builder.overrideProvider(CLOCK).useValue(options.clock);
   }
   const moduleRef = await builder.compile();
-  const app: INestApplication = moduleRef.createNestApplication({
-    bufferLogs: true,
-  });
+  const app: INestApplication = moduleRef.createNestApplication(
+    new ApiHttpAdapter(),
+    { bufferLogs: true },
+  );
   app.useLogger(app.get(Logger));
-  await app.init();
+  await configureApp(app);
   return {
     app,
     server: app.getHttpServer() as Server,

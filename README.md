@@ -12,6 +12,7 @@ Today the repository contains the runnable foundation only:
 - liveness and readiness endpoints, `GET /health/live` and `GET /health/ready`;
 - validated environment configuration that stops the API at startup when it is invalid;
 - structured JSON logs with a correlation ID on every request;
+- one error format for every failure, with a stable `code`, a safe message, and the correlation ID, plus request validation with Zod and an OpenAPI document served outside production (see API conventions);
 - a forward-only SQL migration runner (`pnpm db:migrate`);
 - database tables for merchants and an append-only audit trail, with the constraints enforced by PostgreSQL itself (storage only: there are no merchant endpoints yet);
 - API key issuance and revocation inside the API code: keys carry 256 bits of randomness, only a lookup identifier and a SHA-256 hash are stored, and each issuance or revocation writes an audit event (no endpoint or authentication guard uses them yet);
@@ -92,6 +93,37 @@ Run each of these as `docker compose exec dev pnpm <script>`.
 
 `pnpm db:migrate` is safe to run repeatedly: applied migrations are recorded and never run twice, and concurrent runs are serialized by a database lock. The first run on an empty database creates the `merchants` and `audit_events` tables, and later runs report `Nothing is pending.` It empties `apps/api/dist` when it builds, which can interrupt a `pnpm dev` that is restarting at that moment.
 
+## API conventions
+
+Business endpoints will live under `/api/v1`; the health endpoints keep their paths, `/health/live` and `/health/ready`. No business endpoint exists yet.
+
+Every error response has the same body, and its `correlationId` equals the `X-Correlation-Id` response header. `message` is fixed text for each `code`; it never contains parser, framework, or internal details, and a validation error lists the field path and the rule code of each invalid field, never the received value.
+
+```json
+{
+  "error": {
+    "code": "VALIDATION_FAILED",
+    "message": "The request does not match the expected format.",
+    "correlationId": "5b0d2c0e-6a63-4d4b-8c1f-3f8f4a0c9d11",
+    "issues": [{ "path": ["quantity"], "code": "invalid_type" }]
+  }
+}
+```
+
+| Code                     | Status | Meaning                                                                        |
+| ------------------------ | ------ | ------------------------------------------------------------------------------ |
+| `VALIDATION_FAILED`      | 400    | Body, query, or route parameters do not match their schema; has `issues`       |
+| `MALFORMED_JSON`         | 400    | The body is not valid JSON                                                     |
+| `REQUEST_REJECTED`       | 4xx    | Any other client error, with its own status                                    |
+| `NOT_FOUND`              | 404    | Unknown route, unsupported method, or (later) a resource the caller cannot see |
+| `PAYLOAD_TOO_LARGE`      | 413    | The body exceeds the parser's default limit                                    |
+| `UNSUPPORTED_MEDIA_TYPE` | 415    | The body encoding is not supported                                             |
+| `INTERNAL_ERROR`         | 500    | An unexpected failure; the cause is only in the server log                     |
+
+The `/health/ready` answer is the exception: its `503` body stays `{"status":"unavailable"}`, because probes read the status.
+
+Outside production (`NODE_ENV` other than `production`) the API serves its OpenAPI document at `GET /docs/openapi.json` and an interactive UI at `GET /docs`. In production neither exists.
+
 ## Configuration
 
 The API reads its configuration from environment variables and refuses to start, with an error that names the invalid variable but never its value, when one is invalid.
@@ -108,6 +140,8 @@ The API reads its configuration from environment variables and refuses to start,
 
 ## Current limitations
 
+- A request the JSON body parser rejects (malformed JSON, for instance) receives the standard error but writes no access log line.
+- The OpenAPI document does not describe error responses yet, and no rate limit or input size limit beyond the parser's default exists.
 - Only the foundation, the merchant, audit, and API key tables, and the key issuance and revocation code exist: no merchant or authentication endpoints, no request authentication, payments, processors, ledger, or dashboard. These are planned.
 - `api_keys` accepts only the `PLATFORM_ADMIN`, `MERCHANT_ADMIN`, and `MERCHANT_READ_ONLY` roles; rows can be revoked once and never removed or reactivated, through triggers that a database superuser or the table owner can still disable.
 - `audit_events` rejects updates, deletes, and truncation through a trigger, which a database superuser or the table owner can still disable. Audit metadata must never hold secrets or payment credentials.
