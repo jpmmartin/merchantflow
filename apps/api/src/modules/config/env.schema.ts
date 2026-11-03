@@ -20,6 +20,8 @@ export const envSchema = z.object({
     .enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent'])
     .default('info'),
   HOST: z.union([z.ipv4(), z.ipv6()]).default('127.0.0.1'),
+  // Carries the database password, so it is required and has no default.
+  DATABASE_URL: z.url({ protocol: /^postgres(ql)?$/ }),
 });
 
 export type Env = z.infer<typeof envSchema>;

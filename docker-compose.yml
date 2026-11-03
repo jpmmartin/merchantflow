@@ -30,6 +30,10 @@ services:
       # A server bound to the container's loopback is unreachable through a
       # published port, so the API must listen on all interfaces here.
       HOST: 0.0.0.0
+      # Same credentials as the `postgres` service, reached by its service name
+      # on the Compose network. A POSTGRES_PASSWORD with reserved URL characters
+      # must be percent-encoded here.
+      DATABASE_URL: postgresql://merchantflow:${POSTGRES_PASSWORD:-merchantflow_dev}@postgres:5432/merchantflow
     volumes:
       - .:/workspace
       - node-modules:/workspace/node_modules

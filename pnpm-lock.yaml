@@ -184,6 +184,9 @@ importers:
 
   apps/api:
     dependencies:
+      '@merchantflow/database':
+        specifier: workspace:*
+        version: link:../../packages/database
       '@nestjs/common':
         specifier: 12.3.2
         version: 12.3.2(reflect-metadata@0.2.2)(rxjs@7.8.2)
@@ -215,6 +218,9 @@ importers:
         specifier: 4.6.7
         version: 4.6.7
     devDependencies:
+      '@merchantflow/test-support':
+        specifier: workspace:*
+        version: link:../../packages/test-support
       '@nestjs/cli':
         specifier: 12.0.11
         version: 12.0.11(@types/node@26.6.6)(prettier@3.9.10)
@@ -224,12 +230,46 @@ importers:
       '@types/node':
         specifier: 26.6.6
         version: 26.6.6
+      '@types/pg':
+        specifier: 8.23.1
+        version: 8.23.1
       '@types/supertest':
         specifier: 7.2.1
         version: 7.2.1
+      pg:
+        specifier: 8.23.1
+        version: 8.23.1
       supertest:
         specifier: 7.3.1
         version: 7.3.1
+      typescript:
+        specifier: 6.0.3
+        version: 6.0.3
+      vite:
+        specifier: 8.3.5
+        version: 8.3.5(@types/node@26.6.6)(yaml@2.9.1)
+      vitest:
+        specifier: 5.0.5
+        version: 5.0.5(@types/node@26.6.6)(vite@8.3.5(@types/node@26.6.6)(yaml@2.9.1))
+
+  packages/database:
+    dependencies:
+      kysely:
+        specifier: 0.29.8
+        version: 0.29.8
+      pg:
+        specifier: 8.23.1
+        version: 8.23.1
+    devDependencies:
+      '@merchantflow/test-support':
+        specifier: workspace:*
+        version: link:../test-support
+      '@types/node':
+        specifier: 26.6.6
+        version: 26.6.6
+      '@types/pg':
+        specifier: 8.23.1
+        version: 8.23.1
       typescript:
         specifier: 6.0.3
         version: 6.0.3
@@ -1672,6 +1712,10 @@ packages:
 
   keyv@5.6.0:
     resolution: {integrity: sha512-CYDD3SOtsHtyXeEORYRx2qBtpDJFjRTGXUtmNEMGyzYOKj1TE3tycdlho7kA1Ufx9OYWZzg52QFBGALTirzDSw==}
+
+  kysely@0.29.8:
+    resolution: {integrity: sha512-ixHU1H4R+LeC5Y0nAhYgiGRFpFRHm2DXKEmJSs/vbes9sKXyssyzxzE/NYiOJX5fY0BL28biCre3GqlCqUwyXQ==}
+    engines: {node: '>=22.0.0'}
 
   lazystream@1.0.1:
     resolution: {integrity: sha512-b94GiNHQNy6JNTrt5w6zNyffMrNkXZb3KTkCZJb2V1xaEGCk093vkZ2jk3tpaeP33/OiXC+WvK9AxUebnf5nbw==}
@@ -3978,6 +4022,8 @@ snapshots:
   keyv@5.6.0:
     dependencies:
       '@keyv/serialize': 1.1.1
+
+  kysely@0.29.8: {}
 
   lazystream@1.0.1:
     dependencies:

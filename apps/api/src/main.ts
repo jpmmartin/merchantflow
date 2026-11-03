@@ -9,6 +9,9 @@ import type { Env } from './modules/config/env.schema.js';
 // default console format.
 const app = await NestFactory.create(AppModule, { bufferLogs: true });
 app.useLogger(app.get(Logger));
+// SIGTERM and SIGINT then close the application, which stops the HTTP server
+// and afterwards closes the database pool.
+app.enableShutdownHooks();
 const config = app.get<ConfigService<Env, true>>(ConfigService);
 await app.listen(
   config.get('PORT', { infer: true }),
