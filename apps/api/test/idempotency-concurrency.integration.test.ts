@@ -228,9 +228,9 @@ describe('idempotency claims under concurrency', () => {
     expect(tally(outcomes)).toEqual({ CLAIMED: 2, IN_PROGRESS: RACERS - 2 });
     const rows = await rowsOf(command.idempotencyKey);
     expect(rows).toHaveLength(1);
-    const committedOwner = outcomes.filter(
-      (outcome) => outcome.outcome === 'CLAIMED',
-    )[1];
+    // `settled` is in completion order: the first claim rolled back and the
+    // second committed. `outcomes` follows the order the claims were started.
+    const committedOwner = settled[1];
     expect(rows[0]?.operation_id).toBe(
       committedOwner?.outcome === 'CLAIMED'
         ? committedOwner.record.operationId
