@@ -19,6 +19,12 @@ import {
 const RACERS = 50;
 const RACE_APPLICATION = 'idempotency-race';
 
+/**
+ * How long a test polls for a state it set up. The poll ends as soon as the
+ * state is reached; the bound only matters on a loaded machine.
+ */
+const POLL = { timeout: 30_000, interval: 20 } as const;
+
 type IsolationLevel = 'repeatable read' | 'serializable';
 
 /** A promise and the function that resolves it. */
@@ -129,19 +135,16 @@ describe('idempotency claims under concurrency', () => {
 
   /** Waits until `waiting` claims are blocked, all by one idle owner, and returns it. */
   async function expectWaitingOn(waiting: number): Promise<number> {
-    return vi.waitFor(
-      async () => {
-        const blocked = await blockedClaims();
-        const owners = await idleOwners();
-        expect(blocked).toHaveLength(waiting);
-        expect(owners).toHaveLength(1);
-        for (const claim of blocked) {
-          expect(claim.blockers).toEqual(owners);
-        }
-        return owners[0]!;
-      },
-      { timeout: 30_000, interval: 20 },
-    );
+    return vi.waitFor(async () => {
+      const blocked = await blockedClaims();
+      const owners = await idleOwners();
+      expect(blocked).toHaveLength(waiting);
+      expect(owners).toHaveLength(1);
+      for (const claim of blocked) {
+        expect(claim.blockers).toEqual(owners);
+      }
+      return owners[0]!;
+    }, POLL);
   }
 
   async function rowsOf(idempotencyKey: string) {
@@ -246,7 +249,7 @@ describe('idempotency claims under concurrency', () => {
     const owner = claimAndHold(race, command, settled, () => release.opened, {
       rollbackOwner: () => true,
     });
-    await vi.waitFor(() => expect(settled).toHaveLength(1));
+    await vi.waitFor(() => expect(settled).toHaveLength(1), POLL);
     const waiter = race.transaction().execute((trx) =>
       idempotencyServices().claim.execute(trx, {
         ...command,
@@ -280,7 +283,10 @@ describe('idempotency claims under concurrency', () => {
       });
       await release.opened;
     });
-    await vi.waitFor(async () => expect(await idleOwners()).toHaveLength(1));
+    await vi.waitFor(
+      async () => expect(await idleOwners()).toHaveLength(1),
+      POLL,
+    );
     const waiters = Array.from({ length: 5 }, () =>
       race.transaction().execute((trx) => services.claim.execute(trx, command)),
     );
@@ -299,7 +305,7 @@ describe('idempotency claims under concurrency', () => {
     const release = gate();
 
     const owner = claimAndHold(race, command, settled, () => release.opened);
-    await vi.waitFor(() => expect(settled).toHaveLength(1));
+    await vi.waitFor(() => expect(settled).toHaveLength(1), POLL);
     const waiter = race.transaction().execute((trx) =>
       idempotencyServices().claim.execute(trx, {
         ...command,
@@ -343,7 +349,7 @@ describe('idempotency claims under concurrency', () => {
           settled,
           () => release.opened,
         );
-        await vi.waitFor(() => expect(settled).toHaveLength(1));
+        await vi.waitFor(() => expect(settled).toHaveLength(1), POLL);
         const waiter = claimAndHold(
           race,
           command,

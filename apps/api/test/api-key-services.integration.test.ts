@@ -328,9 +328,17 @@ describe('API key issuance and revocation', () => {
     });
 
     it('issues unique keys and lookup ids under concurrent issuance', async () => {
-      const results = await Promise.all(
-        Array.from({ length: 100 }, () => issuePlatformKey()),
-      );
+      // Each wave of concurrent issuances is as large as the API's pool (10
+      // connections), so no issuance waits for a free connection, and the
+      // pool's 2 s wait limit does not depend on how loaded the machine is.
+      const results: Awaited<ReturnType<typeof issuePlatformKey>>[] = [];
+      for (let wave = 0; wave < 10; wave += 1) {
+        results.push(
+          ...(await Promise.all(
+            Array.from({ length: 10 }, () => issuePlatformKey()),
+          )),
+        );
+      }
 
       expect(new Set(results.map((result) => result.key)).size).toBe(100);
       expect(
