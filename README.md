@@ -1,40 +1,342 @@
 # MerchantFlow
 
-MerchantFlow is a payment orchestration reference platform built as a modular monolith with NestJS and PostgreSQL.
+MerchantFlow is a multi-merchant payment operations platform. A platform administrator onboards merchants. Each merchant connects its own Stripe account, takes card payments (3D Secure included), captures or voids authorizations, and refunds. Every change can be followed through a double-entry ledger, an audit trail, a payment timeline, and real-time notifications.
 
-> **MerchantFlow is a reference implementation.** It uses synthetic data, processes no real money, and is **not production ready or certified** for any payment standard. Never point it at real payment credentials or real cardholder data.
+It is a modular monolith built with TypeScript, NestJS, PostgreSQL, and React. Its purpose is to show how a payment system stays correct when the processor times out, answers twice, or reports an outcome later. To that end it makes money commands idempotent, never treats an ambiguous result as a failure, keeps no database transaction open during a processor call, and enforces strict tenant isolation.
 
-## Overview
+> **Sandbox only.** MerchantFlow uses Stripe in test mode and synthetic data. It processes no real money, rejects live Stripe keys, and is **not production ready or certified** for any payment standard. Never use real card numbers or real payment credentials with it.
 
-Today the repository contains the runnable foundation only:
+## Contents
 
-- a pnpm workspace with a NestJS API (`apps/api`), a PostgreSQL access package (`packages/database`), a provider-agnostic processor port (`packages/processor-contracts`), a Stripe adapter (`packages/processor-stripe`), and a web frontend (`apps/web`, React, Vite, and Bootstrap 5) with sign-in, merchant management, the users, API keys, and Stripe accounts of each merchant, the payment orders of a merchant user, paid with a card in Stripe's own fields, 3D Secure included, with each order's timeline, and an audit log page (see Web frontend);
-- liveness and readiness endpoints, `GET /health/live` and `GET /health/ready`;
-- validated environment configuration that stops the API at startup when it is invalid;
-- structured JSON logs with a correlation ID on every request;
-- one error format for every failure, with a stable `code`, a safe message, and the correlation ID, plus request validation with Zod and an OpenAPI document served when `OPENAPI_ENABLED` allows it (see API conventions);
-- a forward-only SQL migration runner (`pnpm db:migrate`);
-- database tables for merchants, API keys, users, user sessions, processor accounts, an append-only audit trail, idempotency records, payment intents, payment attempts, refunds, a ledger, and notifications with their per-user read state, with the constraints enforced by PostgreSQL itself;
-- API keys: 256 bits of randomness, only a lookup identifier and a SHA-256 hash stored, and an audit event for each issuance and revocation;
-- request authentication: a global guard checks the `Authorization: Bearer <token>` header, an API key or a user session token, against the stored hash on every request, with deny-by-default routing and role checks (see Authentication);
-- user sign-in: `POST /api/v1/auth/login` with an email and a password (scrypt hashes only), `POST /api/v1/auth/logout`, and `GET /api/v1/auth/me`;
-- merchant endpoints under `/api/v1/merchants`: create, read, list with stable pagination, update, change status, list, issue, and revoke API keys, create, list, and disable merchant users, and connect, list, disable, and choose the default of Stripe test accounts, each with role rules, tenant isolation, and an audit event for each change (see Merchant endpoints);
-- payment intent creation, `POST /api/v1/payment-intents`, with a required `Idempotency-Key` and protection against a second intent for the same merchant order (see Payment intents); nothing is charged;
-- payment intent retrieval, `GET /api/v1/payment-intents/{id}`, and listing, `GET /api/v1/payment-intents`, newest first with stable pagination and a status filter, both scoped to the merchant of the key (see Payment intents);
-- payment confirmation through Stripe in test mode, `POST /api/v1/payment-intents/{id}/confirm`, with a required `Idempotency-Key`, the merchant's default Stripe account, and no database transaction open during the Stripe call; 3D Secure completion, `POST /api/v1/payment-intents/{id}/complete-action`; and the attempt history, `GET /api/v1/payment-intents/{id}/attempts` (see Confirming a payment intent);
-- refunds through Stripe in test mode, full or partial, `POST /api/v1/payment-intents/{id}/refunds` with a required `Idempotency-Key`, through the Stripe account that captured the payment, and the refund list, `GET /api/v1/payment-intents/{id}/refunds` (see Refunding a payment intent);
-- manual capture: an order created with `capture_mode` `MANUAL` is only authorized when it is paid (`REQUIRES_CAPTURE`, the funds held and not captured), then `POST /api/v1/payment-intents/{id}/capture` captures its whole amount (`SUCCEEDED`) or `POST /api/v1/payment-intents/{id}/void` releases the hold (`CANCELED`), each with a required `Idempotency-Key`; `GET /api/v1/payment-intents/{id}/hold-actions` lists the captures and voids, and `.../hold-actions/{actionId}/refresh` checks one whose outcome is unknown (see Capturing or voiding an authorized payment);
-- Stripe webhooks per processor account: `POST /api/v1/webhooks/stripe/{processorAccountId}`, public and authenticated only by the signature, with an inbox of received events; a refund that Stripe finishes or fails later, and a payment left in `REQUIRES_ACTION` or `UNKNOWN`, are brought up to date from Stripe; the webhook of each account is configured automatically in the merchant's own Stripe account or with a pasted signing secret; `POST /api/v1/payment-intents/{id}/refunds/{refundId}/refresh` checks one refund without a webhook; and an optional ngrok service exposes only the webhook route in local work (see Stripe webhooks);
-- a double-entry merchant ledger: each successful payment and each successful refund posts one balanced, immutable journal entry in the same transaction that records the success, and `GET /api/v1/merchants/{id}/ledger/balances`, `.../ledger/journal-entries`, and `.../ledger/journal-entries/{journalEntryId}` read the accounts with their balances and the entries (see Ledger);
-- an audit log and a payment timeline: `GET /api/v1/audit-events` lists the audit trail newest first with stable pagination and filters by action and time (every event for the platform administrator, only the own merchant's for a merchant user), and `GET /api/v1/payment-intents/{id}/timeline` combines everything that happened to one payment in time order, each step with who did it (see Audit log and payment timeline);
-- notifications of payment and refund changes made without a request of the user (a refund that Stripe finishes, fails, or reverses later, a payment or a capture or void resolved by a webhook or by **Check with Stripe**): `GET /api/v1/notifications` (the tray, with the unread count), `POST /api/v1/notifications/{id}/read` and `/read-all`, and `GET /api/v1/notifications/stream`, a Server-Sent Events stream for signed-in merchant users, delivered through PostgreSQL `LISTEN/NOTIFY` (see Notifications);
-- a development seed, `pnpm db:seed`, that creates the first platform administrator key and the platform administrator user (see Demonstration: two merchants, neither sees the other, and Web frontend);
-- linting, formatting, type checking, unit tests, and integration tests against a real PostgreSQL started with Testcontainers, including an HTTP concurrency suite (`tests/concurrency`) that sends 50 simultaneous requests to the listening API and checks that duplicates create one intent;
-- a GitHub Actions workflow that runs the same checks.
+- [Live demo](#live-demo)
+- [What it does](#what-it-does)
+- [Architecture](#architecture)
+- [Repository layout](#repository-layout)
+- [Run it locally](#run-it-locally)
+- [Guided tour](#guided-tour)
+- [Using the API](#using-the-api)
+- [Tests and CI](#tests-and-ci)
+- [Deployment](#deployment)
+- [Reference](#reference): commands, API conventions, every endpoint, configuration, and current limitations
 
-Automatic recovery of payments, refunds, captures, and voids with an unknown outcome (beyond what a webhook or a check resolves), partial capture, the simulated processor, processor fees, settlements and payouts in the ledger, and every other business capability are planned and do not exist yet.
+## Live demo
 
-## Prerequisites
+| What               | Where                                                     |
+| ------------------ | --------------------------------------------------------- |
+| Web app            | <https://merchantflow.bytex305.com>                       |
+| API documentation  | <https://api-merchantflow.bytex305.com/docs> (Swagger UI) |
+| OpenAPI document   | <https://api-merchantflow.bytex305.com/docs/openapi.json> |
+| API base URL       | `https://api-merchantflow.bytex305.com/api/v1`            |
+| Readiness probe    | <https://api-merchantflow.bytex305.com/health/ready>      |
+
+- **Access:** there is no public sign-up, and no credentials are published here. Reviewers receive a platform administrator account and merchant user accounts from the author.
+- **Shared data:** the demo merchants are already connected to Stripe test accounts. The administrator account is shared, so its changes, such as suspending a merchant, affect everyone using the demo.
+- **Cards:** only Stripe test cards work (see [Guided tour](#guided-tour)).
+
+## What it does
+
+| Area | Implemented |
+| --- | --- |
+| **Merchants and access** | A platform administrator creates merchants and moves them through `DRAFT`, `ACTIVE`, and `SUSPENDED`. Merchant users sign in with email and password. API keys are for server-to-server calls. The roles are `PLATFORM_ADMIN`, `MERCHANT_ADMIN`, and `MERCHANT_READ_ONLY`. A merchant never sees another merchant's data: such a request gets the same `404` as a resource that does not exist. |
+| **Processor accounts** | Each merchant connects one or more Stripe **test** accounts and chooses a default. Secret keys are encrypted with AES-256-GCM, and live keys are rejected. |
+| **Payments** | Payment orders in `AUTOMATIC` or `MANUAL` capture mode. Payment uses a card entered in Stripe's own fields, so card data never reaches the API. Also: 3D Secure, an attempt history, up to three attempts per order, and an idempotent `Idempotency-Key` on every money command. |
+| **Capture and void** | A `MANUAL` payment is only authorized (`REQUIRES_CAPTURE`). The merchant then captures it in full or voids the hold. |
+| **Refunds** | Full or partial refunds, with the refundable amount reserved under a row lock, so concurrent refunds can never exceed the captured amount. Covers pending refunds, failed refunds, and refunds that Stripe fails after reporting success (reversed in the ledger). |
+| **Stripe webhooks** | A signed endpoint per processor account, configured automatically in the merchant's Stripe account. Events land in an inbox and are applied with the same rules as the API. **Check with Stripe** resolves a refund, capture, or void without waiting for a webhook. |
+| **Ledger** | A double-entry, immutable ledger per merchant: sales, refunds, and reversals, with balances computed from the entries. PostgreSQL itself refuses an unbalanced or modified entry. |
+| **Operations** | An audit log of every change (who did it, the correlation ID, reviewed metadata) and a timeline per payment. |
+| **Notifications** | Changes that happen without a user action, such as a refund that Stripe completes later, reach the browser in real time through Server-Sent Events: a bell, a tray, toasts, and a page that refreshes itself. |
+| **Platform** | Validated configuration, structured JSON logs with a correlation ID, one error format with stable codes, an OpenAPI document, health probes, forward-only SQL migrations, CI, and automatic deployment. |
+
+**Planned, not implemented:**
+- automatic recovery of payments whose outcome stays unknown (today a webhook or **Check with Stripe** resolves them);
+- partial capture;
+- processor fees, settlements, and payouts in the ledger;
+- other providers and routing;
+- an outbox and a background worker;
+- rate limiting, password change and reset, and multi-factor authentication.
+
+## Architecture
+
+```mermaid
+flowchart LR
+  Browser["Web app<br/>React + Vite + Bootstrap"] -->|"Bearer session token"| API
+  Server["Merchant server"] -->|"Bearer API key"| API
+  Stripe["Stripe (test mode)"] -->|"signed webhooks"| API
+  subgraph API["NestJS API"]
+    direction TB
+    Modules["merchants · auth · processors · payments · webhooks<br/>ledger · audit · operations · notifications · idempotency"]
+  end
+  API -->|"Kysely over pg"| PG[("PostgreSQL 17")]
+  API -->|"processor port"| Adapter["Stripe adapter"] --> Stripe
+  PG -.->|"LISTEN/NOTIFY"| API
+  API -.->|"Server-Sent Events"| Browser
+```
+
+**Principles**
+- **Modular monolith.** Each module in `apps/api/src/modules` owns its tables. Other modules use only its exported application services, never its tables.
+- **Dependencies point inward.** `api` (controllers) → `application` (one service per use case) → `packages/domain` (pure rules, with no NestJS, database, or SDK imports). `infrastructure` implements the ports.
+- **Providers sit behind a port.** The payment code talks to `packages/processor-contracts`. Stripe's models stay inside `packages/processor-stripe`, so a second provider means a second adapter, not changes across the codebase.
+- **Typed outcomes.** Business results and state transitions are discriminated unions handled exhaustively. Exceptions are reserved for bugs and infrastructure failures.
+
+**How a money command runs: Reserve, Execute, Apply.** This is what confirm, refund, capture, and void do:
+
+```mermaid
+sequenceDiagram
+  participant C as Client
+  participant A as API
+  participant DB as PostgreSQL
+  participant S as Stripe
+  C->>A: POST .../confirm (Idempotency-Key)
+  A->>DB: Reserve: claim the key, lock the order, record the attempt (short transaction)
+  A->>S: Execute: one call, no transaction open, the attempt id as Stripe's idempotency key
+  S-->>A: outcome, or a timeout
+  A->>DB: Apply: conditional update + ledger entry + audit event + stored answer (one transaction)
+  A-->>C: result (UNKNOWN on a timeout, never "failed")
+```
+
+**Guarantees and where they live**
+- **Idempotency.** Every money command takes an `Idempotency-Key`, scoped by merchant and operation. A retry replays the stored answer byte for byte and never calls Stripe a second time.
+- **Uncertainty.** A timeout or an ambiguous answer is `UNKNOWN`, never a failure. It blocks new attempts until a webhook or a check resolves it, so a customer is never charged twice.
+- **Concurrency.** State changes are conditional updates that check the expected status. Refunds reserve their amount under a row lock. Concurrency tests send dozens of simultaneous requests to check idempotency claims and payment intent creation.
+- **Database invariants.** PostgreSQL enforces the critical rules itself: foreign keys that include `merchant_id`; unique and partial unique indexes (one order per merchant reference, one capture or void per order); check constraints; and triggers that make journal entries, the audit trail, and finished records immutable.
+- **Money.** Amounts are `bigint` minor units in code, `BIGINT` in PostgreSQL, and integer strings in JSON. They never pass through a floating-point `number`.
+- **Atomic state change.** A state change, its ledger entry, its audit event, and its notification commit in one transaction.
+
+**Payment order statuses**
+
+```mermaid
+stateDiagram-v2
+  [*] --> CREATED
+  CREATED --> PROCESSING: confirm
+  PROCESSING --> SUCCEEDED: captured
+  PROCESSING --> REQUIRES_ACTION: 3D Secure
+  PROCESSING --> REQUIRES_CAPTURE: authorized (MANUAL)
+  PROCESSING --> UNKNOWN: timeout
+  PROCESSING --> CREATED: declined, retry allowed
+  PROCESSING --> FAILED: third unsuccessful attempt
+  REQUIRES_ACTION --> SUCCEEDED
+  REQUIRES_ACTION --> REQUIRES_CAPTURE
+  REQUIRES_ACTION --> CREATED: authentication failed
+  UNKNOWN --> SUCCEEDED: resolved by webhook or check
+  UNKNOWN --> CREATED: non-execution proven
+  REQUIRES_CAPTURE --> SUCCEEDED: capture
+  REQUIRES_CAPTURE --> CANCELED: void
+  SUCCEEDED --> PARTIALLY_REFUNDED: refund
+  SUCCEEDED --> REFUNDED: full refund
+  PARTIALLY_REFUNDED --> REFUNDED
+  REFUNDED --> PARTIALLY_REFUNDED: refund failed after success
+  FAILED --> [*]
+  CANCELED --> [*]
+```
+
+`packages/domain/src/payment-intent/payment-intent-transition.ts` holds the full table, including every path to `UNKNOWN` and `FAILED` and the moves back to `SUCCEEDED` when a refund fails after success.
+
+**Stack:**
+- **API:** Node.js 26, TypeScript 6.0 (strict, ESM), NestJS 12, Zod 4 (validation and OpenAPI).
+- **Database:** PostgreSQL 17 with Kysely over `pg` and forward-only SQL migrations.
+- **Payments:** Stripe SDK 23.
+- **Web:** React 19, Vite 8, Bootstrap 5, Stripe.js.
+- **Tests:** Vitest and Testcontainers.
+- **Tooling:** pnpm workspaces, Docker Compose for development, GitHub Actions.
+
+## Repository layout
+
+```text
+apps/
+  api/                    NestJS API
+    src/modules/<module>/ api/ (controllers, schemas), application/ (use cases), infrastructure/
+    src/cli/              migrate, seed, and ledger backfill commands
+    test/                 API and integration tests (tenant isolation suite included)
+  web/                    React single-page app
+packages/
+  domain/                 pure business rules: money, merchant, payment intent, refund, ledger
+  database/               Kysely database, schema types, SQL migrations, LISTEN/NOTIFY listener
+  processor-contracts/    provider-agnostic processor port
+  processor-stripe/       Stripe adapter
+  test-support/           Testcontainers helpers
+tests/concurrency/        HTTP concurrency suite against the listening API
+ngrok/                    traffic policy that exposes only the webhook route in local work
+.github/workflows/        CI and deployment
+```
+
+The API's modules:
+
+| Module | Responsibility |
+| --- | --- |
+| `merchants` | Merchant profile and status, its users and API keys |
+| `auth` | API keys, users, sessions, and the global authentication and role guard |
+| `processors` | Processor accounts and their encrypted credentials |
+| `payments` | Payment intents, attempts, 3D Secure, refunds, capture, and void |
+| `webhooks` | Stripe webhook configuration, receiver, and event inbox |
+| `ledger` | Accounts, journal entries, and balances |
+| `audit` | The append-only audit trail |
+| `operations` | The audit log and payment timeline read models (no tables of its own) |
+| `notifications` | Notifications, read state, and the Server-Sent Events stream |
+| `idempotency` | The idempotency store shared by money commands |
+| `config`, `database`, `logging`, `errors`, `clock`, `health`, `pagination` | Cross-cutting infrastructure |
+
+## Run it locally
+
+Everything runs in Docker. Node.js, pnpm, and PostgreSQL are not needed on the host.
+
+**Prerequisites:**
+- [Docker Desktop](https://docs.docker.com/get-docker/) with Compose v2 (see [Prerequisites](#prerequisites) for other Docker hosts);
+- Git;
+- for payments, a free [Stripe](https://dashboard.stripe.com/register) account. A sandbox in test mode is enough.
+
+1. **Clone and configure.** Create a `.env` with a master key, which encrypts the Stripe secret keys that merchants connect:
+
+   ```bash
+   git clone https://github.com/jpmmartin/merchantflow.git
+   cd merchantflow
+   cp .env.example .env
+   docker compose up -d --build
+   docker compose exec -T dev node -e "console.log(require('node:crypto').randomBytes(32).toString('base64'))"
+   ```
+
+   Paste the printed value into `.env` as `CREDENTIALS_MASTER_KEY=...`, then recreate the container so it reads the key:
+
+   ```bash
+   docker compose up -d
+   ```
+
+2. **Install, migrate, and seed.** The seed creates the platform administrator user and a platform API key, and prints the password and the key **once**. Save both.
+
+   ```bash
+   docker compose exec dev pnpm install --frozen-lockfile
+   docker compose exec dev pnpm db:migrate
+   docker compose exec dev pnpm db:seed
+   ```
+
+3. **Start the API and the web app**, each in its own terminal. Both stay in the foreground.
+
+   ```bash
+   docker compose exec dev pnpm dev
+   ```
+
+   ```bash
+   docker compose exec dev pnpm dev:web
+   ```
+
+   - Web app: <http://localhost:5173>
+   - API: <http://localhost:3000/api/v1>
+   - API documentation: <http://localhost:3000/docs>
+   - `curl http://127.0.0.1:3000/health/ready` answers `{"status":"ready"}`.
+
+4. **Create a merchant.** Sign in at <http://localhost:5173> as `admin@merchantflow.test` with the printed password.
+   - Open **Merchants** and click **Create merchant**.
+   - On the merchant's page, click **Activate**. A new merchant is `DRAFT`, and payments are refused with `MERCHANT_NOT_ACTIVE` until it is active.
+   - Under **Users**, create a user, and copy its password from the dialog.
+
+5. **Connect Stripe.** In the [Stripe Dashboard](https://dashboard.stripe.com/test/apikeys), in test mode, go to **Developers**, then **API keys**, and copy the publishable key (`pk_test_...`) and the secret key (`sk_test_...`). On the merchant's page, open **Processor accounts** and connect them. The first account becomes the default.
+
+6. **Sign in as the merchant user** and follow the [Guided tour](#guided-tour).
+
+7. **Optional: webhooks.** Stripe cannot reach `localhost`. To receive the events that finish pending refunds and late outcomes, start the ngrok tunnel described in [Local delivery with ngrok](#local-delivery-with-ngrok), then click **Configure webhook** on the processor account. Without it, use **Check with Stripe** on the payment page.
+
+`docker compose down` stops everything. Add `--volumes` to also delete the database. Lost the administrator password or the platform key? See [Recover a lost administrator password](#recover-a-lost-administrator-password).
+
+## Guided tour
+
+Sign in as a merchant user. Stripe test cards take any future expiry date, any CVC, and any postal code. The pay screen lists the first four.
+
+| Card | Result |
+| --- | --- |
+| `4242 4242 4242 4242` | Succeeds |
+| `4000 0000 0000 9995` | Declined (insufficient funds) |
+| `4000 0000 0000 3220` | 3D Secure challenge, then succeeds |
+| `4000 0084 0000 1629` | 3D Secure challenge, then declined |
+| `4000 0000 0000 7726` | Succeeds; a refund stays `PENDING`, then Stripe completes it later |
+| `4000 0000 0000 5126` | Succeeds; a refund succeeds, then Stripe fails it later |
+
+1. **Pay.**
+   - In **Payments**, click **Create payment order** and pay with `4242 4242 4242 4242`.
+   - Try a decline, then pay the same order with another card. An order allows three attempts.
+   - With `4000 0000 0000 3220`, Stripe's challenge opens in the page: **Complete** authenticates and **Fail** refuses.
+2. **Authorize, then capture or void.** Create an order with **Capture: Manual** and pay it. It stops at `REQUIRES_CAPTURE`, with the funds held. **Capture** moves it to `SUCCEEDED`; **Void** releases the hold and moves it to `CANCELED`.
+3. **Refund.**
+   - Refund part of a successful payment (`PARTIALLY_REFUNDED`), then the rest (`REFUNDED`). Each refund posts a journal entry.
+   - Pay with `4000 0000 0000 7726` and refund it: the refund is `PENDING`. When Stripe completes it, the webhook updates the page, a toast appears, and the bell counts it, with no reload. Without webhooks, click **Check with Stripe**.
+   - With `4000 0000 0000 5126`, the refund succeeds and then fails: the ledger posts a reversal, and the amount becomes refundable again.
+4. **Follow the money.** Each payment's page shows its attempts, refunds, journal entries, and a **Timeline** with who did each step. **Ledger** shows the balances. **Audit log** lists every change.
+5. **Check tenant isolation.** Sign in as a user of another merchant in a private window. None of the first merchant's orders, ledger, or audit events are visible, and opening one of its payment URLs shows `404`.
+6. **As the administrator,** create a merchant, activate it, connect a Stripe account, add users, and issue API keys. A merchant's ledger is behind the **Ledger** button on its page. Payments belong to merchant users: the administrator has no Payments section.
+
+## Using the API
+
+Every business route is under `/api/v1` and needs `Authorization: Bearer <token>`:
+- **Session token** (`mfs_...`): what the web app gets from `POST /api/v1/auth/login`. It lasts 8 hours.
+- **API key** (`mfk_...`): for a merchant's own server, issued on the merchant's page under **API keys** with the role `MERCHANT_ADMIN` or `MERCHANT_READ_ONLY`. It is shown once and only its hash is stored. A key always acts for its own merchant, whatever merchant ID a request names.
+
+**In Swagger UI** (`/docs`):
+1. Click **Authorize** and paste the token **without** the `Bearer ` prefix; Swagger UI adds it.
+2. Use **Try it out** on any route.
+
+The document lists each route's roles, schemas, and error codes.
+
+**With curl.** Create a payment order, then pay it with Stripe's test payment method `pm_card_visa`. The merchant must be `ACTIVE` and have a default processor account.
+
+```bash
+curl -sS -X POST https://api-merchantflow.bytex305.com/api/v1/payment-intents \
+  -H "Authorization: Bearer $API_KEY" -H 'Content-Type: application/json' \
+  -H 'Idempotency-Key: order-1001' \
+  -d '{"amount_minor":"1000","currency":"USD","merchant_reference":"order-1001"}'
+
+curl -sS -X POST https://api-merchantflow.bytex305.com/api/v1/payment-intents/$INTENT_ID/confirm \
+  -H "Authorization: Bearer $API_KEY" -H 'Content-Type: application/json' \
+  -H 'Idempotency-Key: order-1001-pay-1' \
+  -d '{"payment_method":"pm_card_visa","processor_account_id":"'"$PROCESSOR_ACCOUNT_ID"'"}'
+```
+
+Notes on these requests:
+- Amounts are integer strings in minor units: `"1000"` is 10.00 USD.
+- Sending the same request again with the same `Idempotency-Key` returns the stored answer and charges nothing twice.
+- Every error has a stable `code` and a `correlationId` (see [API conventions](#api-conventions)).
+
+A few routes accept only a signed-in user: the notification routes and `POST /api/v1/auth/logout`. An API key gets `403 SESSION_REQUIRED` there.
+
+## Tests and CI
+
+```bash
+docker compose exec dev pnpm test
+```
+
+```bash
+docker compose exec dev pnpm test:integration
+```
+
+What the suites cover:
+- **Unit tests:** the domain rules.
+- **API tests:** each endpoint, against the real application.
+- **Integration tests:** a real PostgreSQL 17 started by Testcontainers per suite. They cover the migrations, constraints, triggers, locks, idempotency, and a tenant isolation suite. That suite discovers every route and checks that another merchant's resources answer exactly like missing ones and change nothing.
+- **Concurrency suite (`tests/concurrency`):** sends simultaneous requests to the listening API.
+
+The database is never mocked. The features built for the demo (the web app, card payments, refunds, capture and void, webhooks, the audit log, and notifications) followed a reduced test level: the existing suites must keep passing, and each feature was run by hand against real Stripe test-mode sandboxes. Their dedicated automated tests are planned (see [Current limitations](#current-limitations)).
+
+[CI](.github/workflows/ci.yml) runs on every push to `main` and every pull request against it: install, type check, lint, format check, unit and API tests, integration tests, build, and two runs of the migrations against a fresh PostgreSQL.
+
+## Deployment
+
+The live demo runs from `main`:
+- **Trigger:** when [CI](.github/workflows/ci.yml) succeeds on a push to `main`, the [Deploy](.github/workflows/deploy.yml) workflow connects over SSH to the server and passes it the commit to deploy. It can also be run by hand (`workflow_dispatch`).
+- **Not in this repository:** the server's own deployment script, process manager, reverse proxy, and TLS.
+
+Production settings that differ from local work (see [Configuration](#configuration)):
+- `NODE_ENV=production`;
+- `CREDENTIALS_MASTER_KEY` is required;
+- `CORS_ALLOWED_ORIGINS` lists the web app's origin;
+- `VITE_API_BASE_URL` is set when the web app is built;
+- `PUBLIC_API_BASE_URL` is the API's public URL, used for webhook endpoints;
+- `OPENAPI_ENABLED=true` serves the documentation.
+
+The notification stream needs a reverse proxy that does not buffer it (see [Notifications](#notifications)). The development seed and the ledger backfill refuse to run in production.
+
+## Reference
+
+The sections below document every command, endpoint, rule, and setting in detail.
+
+### Prerequisites
 
 - [Docker](https://docs.docker.com/get-docker/) with Docker Compose v2
 - [Git](https://git-scm.com/)
@@ -43,52 +345,16 @@ Node.js, pnpm, and PostgreSQL are not needed on the host: everything runs in con
 
 The setup has been verified on **Docker Desktop only**. The `dev` container mounts the Docker socket so that integration tests can start sibling PostgreSQL containers, and `docker-compose.yml` adds the container's `node` user to the `root` group (`group_add: ['0']`) so it can open that socket. Docker Desktop exposes the socket as `root:root`. On other hosts, such as native Linux, the socket usually belongs to the host's `docker` group, so the group in `group_add` has to be changed to match, or `pnpm test:integration` fails with a permission error on the socket. This mount gives the container control of the local Docker daemon, which is acceptable for local development only.
 
-## Quick start
+The API is published on `127.0.0.1:3000`, the web frontend's development server on `127.0.0.1:5173`, and PostgreSQL on `127.0.0.1:5434`, all only on the local machine. If one of these ports is taken, stop the process that uses it before starting the stack.
 
-1. Clone the repository and start the stack. The first build downloads the Node.js and PostgreSQL images.
-
-   ```bash
-   git clone <repository-url> merchantflow
-   cd merchantflow
-   docker compose up -d --build
-   ```
-
-2. Install the dependencies inside the `dev` container. They are stored in a Docker volume, not on the host.
-
-   ```bash
-   docker compose exec dev pnpm install --frozen-lockfile
-   ```
-
-3. Start the API. This command stays in the foreground and restarts on file changes, so run the next steps in a second terminal.
-
-   ```bash
-   docker compose exec dev pnpm dev
-   ```
-
-4. Check readiness from the host:
-
-   ```bash
-   curl -i http://127.0.0.1:3000/health/ready
-   ```
-
-   A healthy stack answers `200` with `{"status":"ready"}`. If PostgreSQL is stopped, the answer is `503` with `{"status":"unavailable"}`.
-
-5. Stop everything when finished. Add `--volumes` to also delete the database and the dependency volumes.
-
-   ```bash
-   docker compose down
-   ```
-
-The API is published on `127.0.0.1:3000`, the web frontend's development server on `127.0.0.1:5173`, and PostgreSQL on `127.0.0.1:5434`, all only on the local machine. If either port is taken, stop the process that uses it before starting the stack.
-
-## Running commands
+### Running commands
 
 Two kinds of commands are used:
 
 - `docker compose ...` runs on the host and manages the containers.
 - Project commands run inside the `dev` container with `docker compose exec dev <command>`, for example `docker compose exec dev pnpm test`.
 
-## Available commands
+### Available commands
 
 Run each of these as `docker compose exec dev pnpm <script>`.
 
@@ -107,11 +373,11 @@ Run each of these as `docker compose exec dev pnpm <script>`.
 | `db:seed`          | Builds the project, creates the development platform administrator key, and creates the platform administrator user; the key and the user's password are each printed once (see Demonstration and Web frontend) |
 | `db:backfill-ledger` | Builds the project and posts the missing sale entry of every successful payment, such as those that succeeded before the ledger existed; safe to run again (see Ledger) |
 
-`pnpm db:migrate` is safe to run repeatedly: applied migrations are recorded and never run twice, and concurrent runs are serialized by a database lock. The first run on an empty database creates the tables (`merchants`, `audit_events`, `api_keys`, `idempotency_records`, `payment_intents`, `users`, and `user_sessions`), and later runs report `Nothing is pending.` It empties `apps/api/dist` when it builds, which can interrupt a `pnpm dev` that is restarting at that moment.
+`pnpm db:migrate` is safe to run repeatedly: applied migrations are recorded and never run twice, and concurrent runs are serialized by a database lock. The first run on an empty database creates every table, and later runs report `Nothing is pending.` The migrations are the `.sql` files in `packages/database/migrations`, applied in name order. It empties `apps/api/dist` when it builds, which can interrupt a `pnpm dev` that is restarting at that moment.
 
-## API conventions
+### API conventions
 
-Business endpoints live under `/api/v1`; the health endpoints keep their paths, `/health/live` and `/health/ready`. The business endpoints today are the merchant endpoints and payment intent creation and retrieval (see Merchant endpoints and Payment intents).
+Business endpoints live under `/api/v1`; the health endpoints keep their paths, `/health/live` and `/health/ready`. They cover merchants, processor accounts, payment intents (with confirmation, 3D Secure, refunds, capture, and void), Stripe webhooks, the ledger, the audit log and payment timeline, notifications, and authentication; each has its section below.
 
 Every error response has the same body, and its `correlationId` equals the `X-Correlation-Id` response header. `message` is fixed text for each `code`; it never contains parser, framework, or internal details, and a validation error lists the field path and the rule code of each invalid field, never the received value.
 
@@ -151,11 +417,13 @@ Every error response has the same body, and its `correlationId` equals the `X-Co
 | `UNSUPPORTED_MEDIA_TYPE` | 415    | The body encoding is not supported                                             |
 | `INTERNAL_ERROR`         | 500    | An unexpected failure; the cause is only in the server log                     |
 
+The table lists the general codes. Each section below lists the codes of its own endpoints, and the OpenAPI document lists the error responses of every route.
+
 The `/health/ready` answer is the exception: its `503` body stays `{"status":"unavailable"}`, because probes read the status.
 
 When `OPENAPI_ENABLED` is on, the API serves its OpenAPI document at `GET /docs/openapi.json` and an interactive UI at `GET /docs`, without authentication. Unset, it is on outside production and off in production, where both paths answer `404 NOT_FOUND`; set `OPENAPI_ENABLED=true` and restart the API to serve them there. Business routes still require a token.
 
-## Merchant endpoints
+### Merchant endpoints
 
 All of them need an API key or a session token (see Authentication) and use `snake_case` fields. Merchants start in `DRAFT`; the allowed status changes are `DRAFT` to `ACTIVE`, `ACTIVE` to `SUSPENDED`, and `SUSPENDED` to `ACTIVE`.
 
@@ -192,7 +460,7 @@ All of them need an API key or a session token (see Authentication) and use `sna
 
 The first platform administrator key cannot be created through the API; `pnpm db:seed` creates it (see Demonstration).
 
-## Processor accounts
+### Processor accounts
 
 A merchant collects payments through a processor account. For now the only provider is Stripe, in **test mode only**. New payments use the merchant's enabled default account (see Confirming a payment intent).
 
@@ -209,7 +477,7 @@ A merchant collects payments through a processor account. For now the only provi
 
 To try it, use the test keys of your own Stripe sandbox (Dashboard, Developers, API keys, with test mode on).
 
-## Payment intents
+### Payment intents
 
 A payment intent is a merchant's intention to collect an amount. Creating one charges nothing; confirming it charges it (see Confirming a payment intent).
 
@@ -243,7 +511,7 @@ The answer is `201` with `id`, `merchant_id`, `amount_minor`, `currency`, `merch
 
 `MERCHANT_READ_ONLY` and `PLATFORM_ADMIN` keys get `403 INSUFFICIENT_ROLE`. Each creation writes one `PAYMENT_INTENT_CREATED` audit event in the same transaction; a replay or a refused request writes none.
 
-### Reading a payment intent
+#### Reading a payment intent
 
 `GET /api/v1/payment-intents/{id}` returns one intent of the merchant of the key, for `MERCHANT_ADMIN` and `MERCHANT_READ_ONLY` keys.
 
@@ -261,7 +529,7 @@ The answer is `200` with the same body as the create response, and `amount_minor
 - A stored intent that this version cannot represent, such as one in a currency the application does not support, is reported as `500 INTERNAL_ERROR` and logged. It is never answered as `404` and never altered.
 - A read writes no audit event and touches no idempotency record.
 
-### Listing payment intents
+#### Listing payment intents
 
 `GET /api/v1/payment-intents?limit=20&cursor=...&status=...` returns `{"data": [...], "next_cursor": "..."}` with the intents of the merchant of the key, for `MERCHANT_ADMIN` and `MERCHANT_READ_ONLY` keys.
 
@@ -272,10 +540,10 @@ curl -sS -w '\nHTTP %{http_code}\n' 'http://127.0.0.1:3000/api/v1/payment-intent
 
 - The intents are ordered newest first, by creation time and then id. Each item has the same body as `GET /api/v1/payment-intents/{id}`.
 - `limit` is 1 to 100 (default 20). Pass `next_cursor` back unchanged as `cursor`, with the same `status`; it is `null` on the last page. An invalid cursor is a `400`. A walk over the pages never repeats an intent, and never skips one that existed when it began.
-- `status` keeps only the intents in that status: `CREATED`, `PROCESSING`, `REQUIRES_ACTION`, `SUCCEEDED`, `FAILED`, `UNKNOWN`, `PARTIALLY_REFUNDED`, or `REFUNDED` (the OpenAPI document lists them). Any other value, a lower-case one included, is a `400 VALIDATION_FAILED`.
+- `status` keeps only the intents in that status: `CREATED`, `PROCESSING`, `REQUIRES_ACTION`, `REQUIRES_CAPTURE`, `SUCCEEDED`, `FAILED`, `UNKNOWN`, `CANCELED`, `PARTIALLY_REFUNDED`, or `REFUNDED` (the OpenAPI document lists them). Any other value, a lower-case one included, is a `400 VALIDATION_FAILED`.
 - The merchant always comes from the key: a `merchant_id` or any other unknown query parameter is a `400`, and a header naming another merchant is ignored. A `PLATFORM_ADMIN` key or user gets `403 INSUFFICIENT_ROLE`. A `DRAFT` or `SUSPENDED` merchant can still list its intents. A list writes no audit event.
 
-### Confirming a payment intent
+#### Confirming a payment intent
 
 `POST /api/v1/payment-intents/{id}/confirm` charges a `CREATED` intent once through Stripe, in test mode. It needs a `MERCHANT_ADMIN` key or user of an `ACTIVE` merchant and an `Idempotency-Key` header.
 
@@ -305,17 +573,17 @@ curl -sS -w '\nHTTP %{http_code}\n' -X POST http://127.0.0.1:3000/api/v1/payment
 - Another merchant's intent is `404 NOT_FOUND`; `MERCHANT_READ_ONLY` gets `403 INSUFFICIENT_ROLE`, and so does a platform key for every id. A `DRAFT` or `SUSPENDED` merchant is `403 MERCHANT_NOT_ACTIVE`.
 - Each applied result writes one `PAYMENT_INTENT_CONFIRMED` audit event. The client secret never reaches a log line, an audit event, an error, or the database.
 
-### Completing 3D Secure
+#### Completing 3D Secure
 
 After Stripe.js `handleNextAction` ran the challenge in the browser, `POST /api/v1/payment-intents/{id}/complete-action` (`MERCHANT_ADMIN`, no body) reads the PaymentIntent from Stripe and applies the result: `SUCCEEDED` (or, for a `MANUAL` intent, `AUTHORIZED` with the intent `REQUIRES_CAPTURE`), or `DECLINED` when authentication failed or the card was declined (back to `CREATED`, or `FAILED` at the third), or `UNKNOWN` (`202`) when Stripe's status does not establish the outcome. A conclusive result also becomes the stored answer of the confirmation's key, and writes one `PAYMENT_INTENT_ACTION_COMPLETED` audit event. It is safe to call more than once: while the payment still requires action nothing changes and `next_action.client_secret` is returned again; after a result was applied it is `409 PAYMENT_ACTION_NOT_PENDING`. Stripe unreachable is `503 PROCESSOR_LOOKUP_UNAVAILABLE` and changes nothing.
 
-### Attempt history
+#### Attempt history
 
 `GET /api/v1/payment-intents/{id}/attempts` (`MERCHANT_ADMIN` and `MERCHANT_READ_ONLY`) returns `{"payment_intent_id", "merchant_id", "data": [...]}` with every attempt of the intent, oldest first: `id`, `processor_account_id`, `status` (`EXECUTING`, `REQUIRES_ACTION`, `SUCCEEDED`, `DECLINED`, `FAILED`, `UNKNOWN`, or, for a `MANUAL` intent, `AUTHORIZED` and `CANCELED`; `SUCCEEDED` always means captured), `provider_transaction_id` (the Stripe `pi_` ID), `decline_code`, `error_category`, `created_at`, and `updated_at`. Another merchant's intent is `404`.
 
 To find a payment in Stripe, open the Dashboard of the merchant's sandbox, go to **Payments** (test mode), and search for the attempt's `pi_` ID; its metadata holds the MerchantFlow IDs.
 
-### Refunding a payment intent
+#### Refunding a payment intent
 
 `POST /api/v1/payment-intents/{id}/refunds` needs a `MERCHANT_ADMIN` key or user of an `ACTIVE` merchant and an `Idempotency-Key` header. The body is `{"amount_minor": "<integer string>"}` in minor units of the intent's currency, parsed like `amount_minor` at creation (never as a JSON number). Only a `SUCCEEDED` or `PARTIALLY_REFUNDED` intent can be refunded (`409 PAYMENT_INTENT_NOT_REFUNDABLE` otherwise): a `MANUAL` payment is refundable only once it is captured, and an authorized one is voided instead.
 
@@ -340,7 +608,7 @@ The answer is `{"refund": {...}, "payment_intent": {...}}`: the refund (`id`, `p
 
 `GET /api/v1/payment-intents/{id}/refunds` (`MERCHANT_ADMIN` and `MERCHANT_READ_ONLY`) returns the intent's `captured_amount_minor`, `refunded_amount_minor`, `pending_amount_minor`, and `refundable_amount_minor` as integer strings, and its refunds oldest first in `data`. Another merchant's intent is `404` on both routes. In Stripe, the refunds appear on the payment's page in the Dashboard.
 
-### Capturing or voiding an authorized payment
+#### Capturing or voiding an authorized payment
 
 A `MANUAL` intent that Stripe authorized is `REQUIRES_CAPTURE`: the funds are held on the customer's card and nothing is captured or posted to the ledger. Stripe releases an uncaptured card authorization after seven days by default.
 
@@ -367,11 +635,11 @@ The answer is `{"authorization_action": {...}, "payment_intent": {...}, "attempt
 
 `POST /api/v1/payment-intents/{id}/hold-actions/{actionId}/refresh` (`MERCHANT_ADMIN`) resolves an `UNKNOWN` capture or void from Stripe's PaymentIntent, with the same rules as the webhook: captured (for a capture) or canceled (for a void) makes it `SUCCEEDED` and moves the intent; a PaymentIntent that still holds its funds proves the request never took effect, so the action becomes `FAILED` (`not_executed`) and a new capture or void can be sent; the other final state makes it `FAILED` (`payment_already_final`). Anything else changes nothing. It is safe to repeat; `change` says what happened (`CAPTURE_SUCCEEDED`, `CAPTURE_FAILED`, `VOID_SUCCEEDED`, `VOID_FAILED`, or `null`). A resolution writes `PAYMENT_AUTHORIZATION_ACTION_RESOLVED` and makes the original key replay the final answer. In Stripe, the payment shows as uncaptured, then succeeded or canceled.
 
-## Stripe webhooks
+### Stripe webhooks
 
 Stripe tells each merchant's account about payments and refunds that end after MerchantFlow's own call, such as a refund that stays `pending` for a while or a refund that Stripe reports as succeeded and fails later. Each processor account has **its own** webhook endpoint in the merchant's own Stripe account, signed with **its own** secret.
 
-### Configuring the webhook of an account
+#### Configuring the webhook of an account
 
 The endpoint URL of an account is `<PUBLIC_API_BASE_URL>/api/v1/webhooks/stripe/<processor account id>`. `PUBLIC_API_BASE_URL` comes from the configuration (see Configuration); in local work it is your ngrok dev domain (see Local delivery with ngrok).
 
@@ -387,7 +655,7 @@ All routes are below `/api/v1/merchants/{id}/processor-accounts/{processorAccoun
 
 The signing secret is stored encrypted with AES-256-GCM under `CREDENTIALS_MASTER_KEY`, bound to its account, and is never logged or returned. Each change writes a `PROCESSOR_ACCOUNT_WEBHOOK_CONFIGURED` or `PROCESSOR_ACCOUNT_WEBHOOK_REMOVED` audit event without the secret.
 
-### Receiving events
+#### Receiving events
 
 `POST /api/v1/webhooks/stripe/{processorAccountId}` is public: Stripe sends no API key, so the `Stripe-Signature` header, verified on the raw body with the account's secret and Stripe's default tolerance of 300 seconds, is the only authentication. The raw body is kept for this route only; every other route parses JSON as before.
 
@@ -400,15 +668,15 @@ The signing secret is stored encrypted with AES-256-GCM under `CREDENTIALS_MASTE
   - Other types, and objects MerchantFlow did not create, are recorded as `IGNORED`.
 - Changes made by a webhook are audited with the actor `SYSTEM` / `processor-webhook`.
 
-### A refund that fails after it succeeded
+#### A refund that fails after it succeeded
 
 When Stripe fails a refund it had reported as succeeded (`refund.failed`), the refund becomes `FAILED`, a compensating ledger entry reverses its posting (debit `1100`, credit `4100`, source `PAYMENT_REFUND_REVERSAL` with the refund's ID, posted once), the intent moves back to `PARTIALLY_REFUNDED` or `SUCCEEDED` according to the refunds that still succeeded, and the amount is refundable again. The original entry is never changed.
 
-### Checking a refund without a webhook
+#### Checking a refund without a webhook
 
 `POST /api/v1/payment-intents/{id}/refunds/{refundId}/refresh` (`MERCHANT_ADMIN`) reads the refund from Stripe and applies it with the same code as the webhook. It is safe to repeat; `change` says what happened (`REFUND_SUCCEEDED`, `REFUND_FAILED`, `REFUND_PENDING`, `REFUND_REVERSED`, or `null` when Stripe confirms the current status). A refund still `EXECUTING`, or one Stripe never identified, is `409 REFUND_NOT_REFRESHABLE`; Stripe unreachable is `503 PROCESSOR_LOOKUP_UNAVAILABLE`.
 
-### Local delivery with ngrok
+#### Local delivery with ngrok
 
 Stripe cannot reach `localhost`, so local work exposes the API through ngrok, with a traffic policy ([`ngrok/traffic-policy.yml`](ngrok/traffic-policy.yml)) that denies every request except `POST` to `/api/v1/webhooks/stripe/`: sign-in, merchants, payments, the health probes, and the documentation never become public.
 
@@ -429,7 +697,7 @@ Stripe cannot reach `localhost`, so local work exposes the API through ngrok, wi
 
 The `ngrok` service uses the official `ngrok/ngrok` image at an exact version, under the Compose profile `webhooks`, so `docker compose up -d` alone does not start it.
 
-## Ledger
+### Ledger
 
 Each merchant has a double-entry payments ledger. It records the merchant's side of its own Stripe account: the funds go from Stripe to the merchant, and MerchantFlow never holds them or owes them.
 
@@ -467,7 +735,7 @@ It posts the sale entry of every successful attempt that has none, by the same r
 
 All amounts are integer strings of minor units.
 
-## Audit log and payment timeline
+### Audit log and payment timeline
 
 **Audit log.** `GET /api/v1/audit-events?limit=&cursor=&action=&from=&to=` (all three roles) returns `{"data": [...], "next_cursor"}`, newest first by occurrence time and then id, with the pagination rules of the other lists (`limit` 1 to 100, default 20; pass `next_cursor` back unchanged as `cursor`; the cursor does not carry the filters). The scope comes only from the session or key: `PLATFORM_ADMIN` sees every event, including those that concern no merchant (platform keys, platform sign-ins); `MERCHANT_ADMIN` and `MERCHANT_READ_ONLY` see only the events of their own merchant, never one with no merchant. Filters:
 
@@ -484,7 +752,7 @@ Any other parameter, `merchant_id` included, a malformed cursor, or an invalid d
 
 Both routes are in the OpenAPI document (tags Audit and Payment intents) and write nothing.
 
-## Notifications
+### Notifications
 
 A merchant's users are notified of the payment and refund changes that happen without a request of their own, so they need not reload a page to learn about them. A user's own synchronous action (a payment confirmed on the pay screen, a refund, capture, or void that answers at once) does not notify: its answer already shows the outcome. Notified changes, with their `type`:
 
@@ -507,11 +775,11 @@ They are notified whatever resolved them: a Stripe webhook, or **Check with Stri
 
 **Behind a reverse proxy.** The stream needs a proxy that does not buffer it and does not cut idle connections before the keep-alive. The API sends `Content-Type: text/event-stream`, `Cache-Control: private, no-cache, no-store, must-revalidate, max-age=0, no-transform`, and `X-Accel-Buffering: no` (which nginx honors); otherwise disable response buffering for `/api/v1/notifications/stream` (nginx: `proxy_buffering off;`, `proxy_http_version 1.1;`, and `proxy_read_timeout` well above 15 seconds, for example `300s`), do not compress it, and allow long-lived responses. The ngrok traffic policy of local work denies these routes: they are never public.
 
-## Demonstration: two merchants, neither sees the other
+### Demonstration: two merchants, neither sees the other
 
 This walk-through reproduces the first increment from a running stack: a platform administrator registers two merchants, activates them, and issues each an administrator key; each merchant then reads its own data and gets `404` for the other's. It uses synthetic data only. Docker Compose commands run on the host and `pnpm` commands inside the `dev` container (see Running commands); the `curl` commands run on the host. Replace each `<placeholder>` with the value the previous step printed. No real key appears in this document.
 
-**1. Start the stack and install the dependencies** (Quick start, steps 1 and 2). Do not start `pnpm dev` yet: `pnpm db:migrate` and `pnpm db:seed` rebuild and empty `apps/api/dist`, which a running `pnpm dev` also writes to. If it is running, stop it first.
+**1. Start the stack and install the dependencies** (see [Run it locally](#run-it-locally), steps 1 and 2). Do not start `pnpm dev` yet: `pnpm db:migrate` and `pnpm db:seed` rebuild and empty `apps/api/dist`, which a running `pnpm dev` also writes to. If it is running, stop it first.
 
 **2. Apply the migrations.**
 
@@ -598,7 +866,7 @@ curl -sS -w '\nHTTP %{http_code}\n' -X POST "http://127.0.0.1:3000/api/v1/mercha
 
 **8. Clean up.** The demonstration leaves two merchants, three keys, and their audit events in the Compose database. Stop the API, unset the variables (`unset PLATFORM_KEY KEY_A KEY_B MERCHANT_A_ID MERCHANT_B_ID`), and delete the data with `docker compose down --volumes`, which also deletes the dependency volumes. Rows of `api_keys` and `audit_events` cannot be deleted one by one, by design.
 
-### Recover a lost platform key
+#### Recover a lost platform key
 
 A key that was not saved cannot be shown again, and the seed will not create a second one while the first is active. In development, revoke it and run the seed again. The statement below is a manual change: it writes no audit event.
 
@@ -608,9 +876,9 @@ docker compose exec postgres psql -U merchantflow -d merchantflow \
 docker compose exec dev pnpm db:seed
 ```
 
-Alternatively, `docker compose down --volumes` followed by the Quick start gives an empty database.
+Alternatively, `docker compose down --volumes` followed by [Run it locally](#run-it-locally) gives an empty database.
 
-## Web frontend
+### Web frontend
 
 `apps/web` is a React and TypeScript single-page app, built with Vite, routed with React Router, and styled with plain Bootstrap 5 CSS. It calls the API from the browser through one client module (`apps/web/src/api/client.ts`) that sends the session token as `Authorization: Bearer <token>`. It has:
 
@@ -632,14 +900,14 @@ Alternatively, `docker compose down --volumes` followed by the Quick start gives
 - for a merchant user, **notifications**: a bell in the navigation bar with the unread count, and a tray with the latest notifications (title, amount, summary, time; unread ones in bold), **Mark as read**, **Mark all as read**, and **Load more**; a click on one opens its payment. Each new notification also shows a toast in the upper right corner that hides itself after six seconds, and a click on it opens the payment. When the open payment page is the one a notification is about, the page reloads its status, amounts, refunds, attempts, captures and voids, journal entries, and timeline. The app reads the stream with `fetch` (the browser's `EventSource` cannot send the `Authorization` header), reconnects after an error or a closed stream after a delay that doubles from 1 to 30 seconds, resuming after the last notification received, and treats a stream silent for 45 seconds as lost. Stream and tray errors show their code and correlation ID. Signing out closes the stream;
 - a **Ledger** page per merchant (`/merchants/{id}/ledger`): for a merchant user under **Ledger** in the navigation bar, for the platform administrator through the **Ledger** button of each merchant's page. It shows the accounts with code, name, classification, normal side, currency, debit and credit totals, and balance, and the journal entries newest first with **Load more**.
 
-1. With the stack running and the dependencies installed (Quick start steps 1 and 2), apply the migrations and run the seed. The seed prints the administrator's email and a generated password **once**; store the password.
+1. With the stack running and the dependencies installed ([Run it locally](#run-it-locally), steps 1 and 2), apply the migrations and run the seed. The seed prints the administrator's email and a generated password **once**; store the password.
 
    ```bash
    docker compose exec dev pnpm db:migrate
    docker compose exec dev pnpm db:seed
    ```
 
-2. Start the API (Quick start step 3) and, in another terminal, the frontend:
+2. Start the API (`docker compose exec dev pnpm dev`) and, in another terminal, the frontend:
 
    ```bash
    docker compose exec dev pnpm dev:web
@@ -660,7 +928,7 @@ Notes:
 - The browser calls the API at `VITE_API_BASE_URL` (default `http://localhost:3000/api/v1`), read by Vite from the repository-root `.env`.
 - The API answers browsers only from the origins in `CORS_ALLOWED_ORIGINS` (see Configuration). By default, outside production, those are `http://localhost:5173` and `http://127.0.0.1:5173`. To serve the frontend from another origin, list it there, for example `CORS_ALLOWED_ORIGINS=http://localhost:5173,https://demo.example.test`, and restart the API. Wildcards are not accepted.
 
-### Recover a lost administrator password
+#### Recover a lost administrator password
 
 A password that was not saved cannot be shown again, and the seed does not create a second platform user while one exists. In development, delete the user and its sessions and run the seed again. These statements are manual changes and write no audit event.
 
@@ -671,7 +939,7 @@ docker compose exec postgres psql -U merchantflow -d merchantflow \
 docker compose exec dev pnpm db:seed
 ```
 
-## Authentication
+### Authentication
 
 Every route requires an API key or a user session token unless it is explicitly marked public. Send it as `Authorization: Bearer mfk_<lookup id>_<secret>` (API key) or `Authorization: Bearer mfs_<lookup id>_<secret>` (session token). The health probes, `POST /api/v1/auth/login`, and the OpenAPI document (when `OPENAPI_ENABLED` is on) need neither.
 
@@ -698,7 +966,7 @@ curl -sS http://127.0.0.1:3000/api/v1/auth/me -H "Authorization: Bearer $TOKEN"
 curl -sS -i -X POST http://127.0.0.1:3000/api/v1/auth/logout -H "Authorization: Bearer $TOKEN"
 ```
 
-## Configuration
+### Configuration
 
 The API reads its configuration from environment variables and refuses to start, with an error that names the invalid variable but never its value, when one is invalid.
 
@@ -727,7 +995,7 @@ docker compose exec -T dev node -e "console.log(require('node:crypto').randomByt
 
 Keep it: losing it makes every stored secret key unreadable, and the accounts must be connected again. To override a value, copy `.env.example` to `.env` in the repository root; `.env` is ignored by Git and must never be committed. The local database password defaults to a throwaway development value and can be changed with the `POSTGRES_PASSWORD` environment variable when running `docker compose`.
 
-## Current limitations
+### Current limitations
 
 - A request the JSON body parser rejects (malformed JSON, for instance) receives the standard error but writes no access log line.
 - No rate limit or input size limit beyond the parser's default exists yet, sign-in included. There is no password reset, email verification, or multi-factor authentication.
@@ -735,7 +1003,7 @@ Keep it: losing it makes every stored secret key unreadable, and the accounts mu
 - **A payment whose outcome is unknown stays blocked.** Automatic recovery does not exist yet: a crash of the API while it waits for Stripe, a failure to record Stripe's answer, or an `UNKNOWN` result (a timeout, a connection error, a Stripe server error) leaves the attempt `EXECUTING` or `UNKNOWN` and the intent `PROCESSING` or `UNKNOWN`, and no new attempt is accepted for it until recovery exists. Check such a payment in the Stripe Dashboard by its metadata. A payment left in `REQUIRES_ACTION` also blocks new attempts until the customer completes or fails the challenge.
 - Payments use Stripe in test mode and cards only. Manual capture captures the whole amount only (no partial capture), and nothing tracks when an authorization expires: a hold Stripe released after seven days, or a capture or void made in the Stripe Dashboard, leaves the order `REQUIRES_CAPTURE` in MerchantFlow (its webhook event is recorded and changes nothing), and a later capture is refused by Stripe and recorded as `FAILED`. A capture or void whose outcome is unknown blocks new ones until its webhook or **Check with Stripe** resolves it. A refund that Stripe leaves `pending` stays `PENDING` with its amount reserved until a webhook or **Check with Stripe** resolves it. A refund or payment whose outcome is unknown and that never learned its Stripe ID can only be resolved by a webhook that names it; nothing looks it up on its own. Webhooks are processed synchronously in the request (no outbox or worker), and an event Stripe stops redelivering after its retries is not fetched again: use the refund check. The ledger records captured sales and successful refunds: no processor fee, settlement, or payout, and a payment that succeeded before the ledger existed has no entry until `pnpm db:backfill-ledger` runs. Its tables reject changes through triggers that a database superuser or the table owner can still disable. Stripe's PaymentIntent amount limit (99,999,999 minor units) is refused before any call, as a `FAILED` attempt.
 - Idempotency records are kept and never deleted (no purge exists). `payment_intents`, `payment_attempts`, `refunds`, and `processor_events` reject deletes, and changes of an intent's amount, currency, reference, or merchant, of a finished attempt, of a failed refund, of a succeeded refund except to fail, or of a processed event, through triggers that a database superuser or the table owner can still disable.
-- The other business endpoints are the merchant endpoints: no platform key can be issued through the API; the development seed is the only way to create one, and a lost platform key is replaced by revoking it in the database (see Recover a lost platform key). The simulated processor and dashboard are planned.
+- No platform key can be issued through the API: the development seed is the only way to create one, and a lost platform key is replaced by revoking it in the database (see Recover a lost platform key). The simulated processor is planned.
 - The error responses of the health endpoints and of the unknown-route handler are not described in the OpenAPI document.
 - A merchant or payment intent created by a transaction that commits late can be missed by a list walk already past its position; the next walk shows it.
 - The status filter of the payment intent list reads the merchant's intents newest first and keeps those in the status, so a rare status among many intents takes longer to fill a page.
@@ -746,5 +1014,5 @@ Keep it: losing it makes every stored secret key unreadable, and the accounts mu
 - The API's database pool has 10 connections. A request that waits more than 2 seconds for one, on any endpoint, receives `503 SERVICE_BUSY` with `Retry-After` and changed nothing; `GET /health/ready` answers `503` while the pool stays full.
 - Processor accounts: the publishable key is not checked against the secret key's account; the master key cannot be rotated yet (the stored key version allows it later); the list is not paginated; a disabled account cannot be re-enabled.
 - The setup is verified on Docker Desktop only (see Prerequisites).
-- The GitHub Actions workflow has not run on a hosted runner yet.
-- There is no production build, deployment configuration, or container image for running the API outside development.
+- The features built for the client demo (the web app, card payments, 3D Secure, refunds, capture and void, Stripe webhooks, the audit log and timeline, notifications, and `OPENAPI_ENABLED`) were verified by hand against real Stripe test-mode sandboxes and keep every existing suite passing, but have no dedicated automated tests yet beyond the tenant isolation suite, which covers their routes. That includes concurrency tests of confirmation, refunds, and capture.
+- The repository has no production container image: the `Dockerfile` builds the development image only. The [Deploy](.github/workflows/deploy.yml) workflow hands the commit to the server over SSH; the server's deployment script, process manager, reverse proxy, and TLS configuration are not in this repository.
