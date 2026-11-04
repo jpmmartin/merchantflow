@@ -1,4 +1,5 @@
 import {
+  CAPTURE_MODES,
   CURRENCY_EXPONENTS,
   PAYMENT_INTENT_STATUSES,
   isSupportedCurrency,
@@ -46,6 +47,12 @@ export const createPaymentIntentSchema = z.strictObject({
     .describe(
       "The merchant's own order identifier: 1 to 128 visible ASCII characters, case-sensitive. A second intent with the same reference is refused.",
     ),
+  capture_mode: z
+    .enum(CAPTURE_MODES)
+    .optional()
+    .describe(
+      'AUTOMATIC (the default) captures a successful payment at once. MANUAL only authorizes it: the confirmed payment ends in REQUIRES_CAPTURE with the funds held, and the merchant captures it (SUCCEEDED) or voids it (CANCELED). The mode never changes.',
+    ),
 });
 
 export type CreatePaymentIntentBody = z.infer<typeof createPaymentIntentSchema>;
@@ -58,6 +65,7 @@ export const paymentIntentResponseSchema = z.object({
     .describe('Amount in minor units as a base-10 integer string.'),
   currency: z.string(),
   merchant_reference: z.string(),
+  capture_mode: z.enum(CAPTURE_MODES),
   status: z.enum(PAYMENT_INTENT_STATUSES),
   created_at: z.iso.datetime(),
   updated_at: z.iso.datetime(),

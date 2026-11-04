@@ -1,5 +1,15 @@
 export { ProcessorAdapterRegistry } from './adapter-registry.js';
 export {
+  PROCESSOR_AUTHORIZATION_ACTION_STATUSES,
+  matchAuthorizationActionResult,
+  type CaptureInput,
+  type ProcessorAuthorizationActionReferences,
+  type ProcessorAuthorizationActionResult,
+  type ProcessorAuthorizationActionResultHandlers,
+  type ProcessorAuthorizationActionStatus,
+  type VoidInput,
+} from './authorization-actions.js';
+export {
   PROCESSOR_CAPABILITIES,
   type ProcessorCapability,
 } from './capability.js';

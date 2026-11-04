@@ -5,9 +5,11 @@ import { listJournalEntries, type JournalEntry } from '../api/ledger';
 import { listProcessorAccounts, type ProcessorAccount } from '../api/merchants';
 import {
   getPaymentIntent,
+  listAuthorizationActions,
   listPaymentAttempts,
   listRefunds,
   refreshRefund,
+  type AuthorizationAction,
   type PaymentAttempt,
   type PaymentIntent,
   type Refund,
@@ -24,6 +26,7 @@ import {
 } from '../components/PaymentStatusBadge';
 import { formatAmountMinor } from '../money/amount';
 import { PaymentActionSection } from './PaymentActionSection';
+import { PaymentCaptureSection } from './PaymentCaptureSection';
 import {
   PaymentRefundSection,
   RefundAmounts,
@@ -88,7 +91,9 @@ type DetailState =
  * its attempt history, its refunds with the refunded and remaining amounts,
  * its journal entries, and for `MERCHANT_ADMIN` the pay section of a
  * `CREATED` order, the authentication step of a `REQUIRES_ACTION` one, or the
- * refund form of a `SUCCEEDED` or `PARTIALLY_REFUNDED` one. An order of
+ * refund form of a `SUCCEEDED` or `PARTIALLY_REFUNDED` one, and for a
+ * `MANUAL` order its captures and voids with, for `MERCHANT_ADMIN`, the Capture
+ * and Void buttons of a `REQUIRES_CAPTURE` one. An order of
  * another merchant and an unknown id both show the API's `NOT_FOUND`.
  */
 export function PaymentDetailPage({
@@ -116,6 +121,10 @@ export function PaymentDetailPage({
   const [entriesError, setEntriesError] = useState<unknown>(undefined);
   const [refunds, setRefunds] = useState<RefundList | undefined>(undefined);
   const [refundsError, setRefundsError] = useState<unknown>(undefined);
+  const [actions, setActions] = useState<
+    readonly AuthorizationAction[] | undefined
+  >(undefined);
+  const [actionsError, setActionsError] = useState<unknown>(undefined);
 
   const reloadEntries = useCallback(async () => {
     if (merchantId === null) return;
@@ -137,9 +146,19 @@ export function PaymentDetailPage({
     }
   }, [paymentIntentId]);
 
+  const reloadActions = useCallback(async () => {
+    try {
+      setActions((await listAuthorizationActions(paymentIntentId)).data);
+      setActionsError(undefined);
+    } catch (caught) {
+      setActionsError(caught);
+    }
+  }, [paymentIntentId]);
+
   const reload = useCallback(async () => {
     void reloadEntries();
     void reloadRefunds();
+    void reloadActions();
     try {
       const [intent, list] = await Promise.all([
         getPaymentIntent(paymentIntentId),
@@ -156,13 +175,14 @@ export function PaymentDetailPage({
           : { kind: 'failed', error: caught },
       );
     }
-  }, [paymentIntentId, reloadEntries, reloadRefunds]);
+  }, [paymentIntentId, reloadEntries, reloadRefunds, reloadActions]);
 
   useEffect(() => {
     setState({ kind: 'loading' });
     setAttempts(undefined);
     setEntries(undefined);
     setRefunds(undefined);
+    setActions(undefined);
     setOutcome(undefined);
     void reload();
   }, [reload]);
@@ -211,7 +231,13 @@ export function PaymentDetailPage({
       {state.kind === 'loaded' ? (
         <>
           <Details intent={state.intent} />
-          {outcome === undefined ? null : <OutcomeAlert outcome={outcome} />}
+          {/* The outcome of the last payment step, while the order is still in
+              the status that step left it in. */}
+          {outcome === undefined ||
+          outcome.confirmation.payment_intent.status !==
+            state.intent.status ? null : (
+            <OutcomeAlert outcome={outcome} />
+          )}
           {state.intent.status === 'UNKNOWN' ? (
             <div className="alert alert-warning" role="alert">
               <strong>Outcome unknown.</strong> An attempt of this payment may
@@ -240,6 +266,20 @@ export function PaymentDetailPage({
               onOutcome={setOutcome}
               onChanged={() => void reload()}
             />
+          ) : null}
+          {state.intent.capture_mode === 'MANUAL' ? (
+            <>
+              <ErrorAlert error={actionsError} />
+              {actions === undefined ? null : (
+                <PaymentCaptureSection
+                  intent={state.intent}
+                  actions={actions}
+                  accounts={accounts}
+                  admin={admin}
+                  onChanged={() => void reload()}
+                />
+              )}
+            </>
           ) : null}
           <AttemptHistory
             attempts={attempts}
@@ -281,9 +321,11 @@ export function PaymentDetailPage({
             <ErrorAlert error={entriesError} />
             {entries === undefined ? null : entries.length === 0 ? (
               <p className="text-body-secondary">
-                No journal entries. A payment is posted to the ledger when it
-                succeeds, and a refund when it succeeds; declines, pending
-                payments, and pending or failed refunds post nothing.
+                No journal entries. A payment is posted to the ledger when it is
+                captured (when it succeeds, or for a manual-capture payment when
+                it is captured), and a refund when it succeeds; authorizations,
+                voids, declines, pending payments, and pending or failed refunds
+                post nothing.
               </p>
             ) : (
               <JournalEntriesTable entries={entries} linkPayments={false} />
@@ -339,6 +381,16 @@ function OutcomeAlert({ outcome }: { readonly outcome: PaymentStepOutcome }) {
           {note}
         </div>
       );
+    case 'AUTHORIZED':
+      return (
+        <div className="alert alert-success" role="status">
+          <strong>Payment authorized.</strong> Stripe payment{' '}
+          <code>{attempt.provider_transaction_id}</code> holds the funds;
+          nothing is captured until you capture it below.
+        </div>
+      );
+    case 'CANCELED':
+      return null;
     case 'REQUIRES_ACTION':
       return (
         <div className="alert alert-info" role="status">
@@ -451,6 +503,12 @@ function Details({ intent }: { readonly intent: PaymentIntent }) {
         <dt className="col-sm-3">Order reference</dt>
         <dd className="col-sm-9">
           <code>{intent.merchant_reference}</code>
+        </dd>
+        <dt className="col-sm-3">Capture</dt>
+        <dd className="col-sm-9">
+          {intent.capture_mode === 'MANUAL'
+            ? 'Manual: authorized first, then captured or voided'
+            : 'Automatic'}
         </dd>
         <dt className="col-sm-3">Status</dt>
         <dd className="col-sm-9">

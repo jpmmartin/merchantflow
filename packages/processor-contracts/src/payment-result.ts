@@ -5,7 +5,12 @@ import type { ProcessorErrorCategory } from './error-category.js';
  * type crosses this boundary: an adapter translates its own models into one of
  * these variants.
  *
- * - `succeeded`: the provider executed the operation.
+ * - `succeeded`: the provider executed the operation; for a payment, the
+ *   funds are captured.
+ * - `authorized`: the provider authorized a manual-capture payment and holds
+ *   the funds; nothing is captured until a capture.
+ * - `canceled`: the provider's payment was canceled; a hold it had was
+ *   released and nothing can be captured.
  * - `declined`: the provider or the issuer refused it; nothing was charged.
  * - `requires_action`: the customer must complete a step, such as 3D Secure.
  * - `failed_before_execution`: the adapter can prove the provider never
@@ -16,6 +21,14 @@ import type { ProcessorErrorCategory } from './error-category.js';
 export type ProcessorPaymentResult =
   | {
       readonly status: 'succeeded';
+      readonly providerTransactionId: string;
+    }
+  | {
+      readonly status: 'authorized';
+      readonly providerTransactionId: string;
+    }
+  | {
+      readonly status: 'canceled';
       readonly providerTransactionId: string;
     }
   | {
@@ -50,6 +63,8 @@ export type ProcessorPaymentStatus = ProcessorPaymentResult['status'];
 /** Every status, in a fixed order, for exhaustive checks and documentation. */
 export const PROCESSOR_PAYMENT_STATUSES = [
   'succeeded',
+  'authorized',
+  'canceled',
   'declined',
   'requires_action',
   'failed_before_execution',
@@ -74,6 +89,10 @@ export function matchPaymentResult<T>(
   switch (result.status) {
     case 'succeeded':
       return handlers.succeeded(result);
+    case 'authorized':
+      return handlers.authorized(result);
+    case 'canceled':
+      return handlers.canceled(result);
     case 'declined':
       return handlers.declined(result);
     case 'requires_action':

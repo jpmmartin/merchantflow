@@ -69,6 +69,13 @@ type TransitionGuard = 'ALWAYS' | 'RETRY_AVAILABLE' | 'ATTEMPTS_EXHAUSTED';
  *   by the owner on 2026-11-03): `REFUNDED` back to `PARTIALLY_REFUNDED` or
  *   `SUCCEEDED`, and `PARTIALLY_REFUNDED` back to `SUCCEEDED`, according to the
  *   refunds that still succeeded.
+
+ * - Authorization of a manual-capture payment (P-08): `PROCESSING`,
+ *   `REQUIRES_ACTION` (the customer passed 3D Secure), or `UNKNOWN` (the
+ *   provider's state proves the hold) to `REQUIRES_CAPTURE`.
+ * - Capture of the held funds: `REQUIRES_CAPTURE` to `SUCCEEDED`, the captured
+ *   payment that refunds then start from.
+ * - Void of the hold: `REQUIRES_CAPTURE` to `CANCELED`, which is terminal.
  */
 const TRANSITIONS: Readonly<
   Record<
@@ -81,20 +88,25 @@ const TRANSITIONS: Readonly<
     SUCCEEDED: 'ALWAYS',
     UNKNOWN: 'ALWAYS',
     REQUIRES_ACTION: 'ALWAYS',
+    REQUIRES_CAPTURE: 'ALWAYS',
     CREATED: 'RETRY_AVAILABLE',
     FAILED: 'ATTEMPTS_EXHAUSTED',
   },
   REQUIRES_ACTION: {
     SUCCEEDED: 'ALWAYS',
     UNKNOWN: 'ALWAYS',
+    REQUIRES_CAPTURE: 'ALWAYS',
     CREATED: 'RETRY_AVAILABLE',
     FAILED: 'ATTEMPTS_EXHAUSTED',
   },
   UNKNOWN: {
     SUCCEEDED: 'ALWAYS',
+    REQUIRES_CAPTURE: 'ALWAYS',
     CREATED: 'RETRY_AVAILABLE',
     FAILED: 'ATTEMPTS_EXHAUSTED',
   },
+  REQUIRES_CAPTURE: { SUCCEEDED: 'ALWAYS', CANCELED: 'ALWAYS' },
+  CANCELED: {},
   SUCCEEDED: { PARTIALLY_REFUNDED: 'ALWAYS', REFUNDED: 'ALWAYS' },
   FAILED: {},
   PARTIALLY_REFUNDED: {
@@ -107,7 +119,7 @@ const TRANSITIONS: Readonly<
 
 /**
  * Statuses whose payment outcome is final: the payment was captured, refunded
- * in part or in full, or failed. Nothing can move them back into the payment
+ * in part or in full, failed, or its authorization was voided. Nothing can move them back into the payment
  * lifecycle, so a target outside their row is `TERMINAL_STATUS`; only the
  * refund targets of their row, and the moves back after a refund failed, are
  * allowed.
@@ -117,6 +129,7 @@ const SETTLED_STATUSES: ReadonlySet<PaymentIntentStatus> = new Set([
   'FAILED',
   'PARTIALLY_REFUNDED',
   'REFUNDED',
+  'CANCELED',
 ]);
 
 function isValidAttemptCount(value: number | undefined): value is number {

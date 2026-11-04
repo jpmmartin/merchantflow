@@ -53,6 +53,13 @@ const FAKE_WEBHOOK_SIGNING_SECRET = ['whsec', 'tenant0isolation0fixture'].join(
  */
 const NO_REFUND_ID = '00000000-0000-4000-8000-000000000000';
 
+/**
+ * A capture or void ID for the action check route. The tenants have no
+ * actions, so the action is always unknown and the check never reaches
+ * Stripe; the intent is checked first.
+ */
+const NO_AUTHORIZATION_ACTION_ID = '00000000-0000-4000-8000-000000000001';
+
 /** A request a route entry builds for a set of resources. */
 export interface BuiltRequest {
   /** Path below the API prefix, with its query string if any. */
@@ -483,6 +490,51 @@ export const TENANT_ROUTES: readonly TenantRoute[] = [
     route: 'POST /payment-intents/:id/refunds/:refundId/refresh',
     request: (r) => ({
       path: `/payment-intents/${r.paymentIntentId}/refunds/${NO_REFUND_ID}/refresh`,
+    }),
+    platformExisting: 403,
+    platformMissing: 403,
+  },
+  {
+    // Another merchant's intent is 404 before the role, the key, the status,
+    // or the account is read, and the tenant intents are CREATED, so no
+    // request of the suite reaches a provider. The platform key is refused by
+    // the guard for every id.
+    kind: 'resource',
+    route: 'POST /payment-intents/:id/capture',
+    request: (r) => ({
+      path: `/payment-intents/${r.paymentIntentId}/capture`,
+      headers: { 'Idempotency-Key': `tenant-${randomUUID()}` },
+    }),
+    platformExisting: 403,
+    platformMissing: 403,
+  },
+  {
+    // As for capture.
+    kind: 'resource',
+    route: 'POST /payment-intents/:id/void',
+    request: (r) => ({
+      path: `/payment-intents/${r.paymentIntentId}/void`,
+      headers: { 'Idempotency-Key': `tenant-${randomUUID()}` },
+    }),
+    platformExisting: 403,
+    platformMissing: 403,
+  },
+  {
+    kind: 'resource',
+    route: 'GET /payment-intents/:id/hold-actions',
+    request: (r) => ({
+      path: `/payment-intents/${r.paymentIntentId}/hold-actions`,
+    }),
+    platformExisting: 403,
+    platformMissing: 403,
+  },
+  {
+    // Another merchant's intent is 404 before the role or the action is read,
+    // and the action ID names no action, so no request reaches a provider.
+    kind: 'resource',
+    route: 'POST /payment-intents/:id/hold-actions/:actionId/refresh',
+    request: (r) => ({
+      path: `/payment-intents/${r.paymentIntentId}/hold-actions/${NO_AUTHORIZATION_ACTION_ID}/refresh`,
     }),
     platformExisting: 403,
     platformMissing: 403,

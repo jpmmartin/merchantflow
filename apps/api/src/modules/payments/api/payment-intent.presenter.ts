@@ -20,6 +20,7 @@ export function toPaymentIntentResponse(
     amount_minor: toAmountMinorString(intent.amount),
     currency: intent.amount.currency,
     merchant_reference: intent.merchantReference,
+    capture_mode: intent.captureMode,
     status: intent.status,
     created_at: intent.createdAt.toISOString(),
     updated_at: intent.updatedAt.toISOString(),

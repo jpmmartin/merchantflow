@@ -13,7 +13,9 @@ import type {
   AuditActor,
   PresentPaymentConfirmation,
 } from '../../payments/application/apply-attempt-resolution.service.js';
+import type { PresentAuthorizationAction } from '../../payments/application/apply-authorization-action.service.js';
 import type { PresentRefund } from '../../payments/application/refund-payment-intent.service.js';
+import { ResolveAuthorizationActionService } from '../../payments/application/resolve-authorization-action.service.js';
 import { ResolvePaymentAttemptService } from '../../payments/application/resolve-payment-attempt.service.js';
 import { ResolveRefundService } from '../../payments/application/resolve-refund.service.js';
 import { PROCESSOR_REGISTRY } from '../../processors/application/processor-registry.js';
@@ -56,6 +58,7 @@ export interface ReceiveProviderEventCommand {
   readonly signatureHeader: string | undefined;
   readonly presentConfirmation: PresentPaymentConfirmation;
   readonly presentRefund: PresentRefund;
+  readonly presentAuthorizationAction: PresentAuthorizationAction;
 }
 
 export type ReceiveProviderEventResult =
@@ -93,8 +96,8 @@ interface RunOutcome {
  * 3. An event whose outcome is final (`PROCESSED` or `IGNORED`) is
  *    acknowledged again and changes nothing. A new event, or one that
  *    `FAILED` before, is processed now.
- * 4. Processing treats the event as a trigger only: the payment or refund it
- *    names is read from the provider, with no transaction open and within
+ * 4. Processing treats the event as a trigger only: the payment, refund, or
+ *    capture or void it names is read from the provider, with no transaction open and within
  *    `WEBHOOK_LOOKUP_TIMEOUT_MILLIS`, and applied by the payments module's
  *    resolution services with conditional updates. Types the platform does
  *    not handle, and objects it does not know, are `IGNORED`.
@@ -116,6 +119,7 @@ export class ReceiveProviderEventService {
     private readonly accounts: ProcessorAccountsForWebhooksService,
     private readonly resolvePaymentAttempt: ResolvePaymentAttemptService,
     private readonly resolveRefund: ResolveRefundService,
+    private readonly resolveAuthorizationAction: ResolveAuthorizationActionService,
     private readonly logger: PinoLogger,
   ) {
     this.logger.setContext(ReceiveProviderEventService.name);
@@ -312,7 +316,13 @@ export class ReceiveProviderEventService {
           case 'RESOLVED':
             return { outcome: 'PROCESSED', detail: result.detail };
           case 'NO_CHANGE':
-            return { outcome: 'PROCESSED', detail: 'NO_CHANGE' };
+            // The attempt waits for nothing; a capture or void of its hold
+            // may still wait for its outcome.
+            return this.processAuthorizationAction(
+              command,
+              account,
+              event.providerTransactionId,
+            );
           case 'NOT_MATCHED':
             return { outcome: 'IGNORED', detail: 'NOT_MATCHED' };
           case 'EXECUTING':
@@ -369,5 +379,43 @@ export class ReceiveProviderEventService {
     throw new Error(
       `unhandled provider event subject ${String(event.subject)}`,
     );
+  }
+
+  /**
+   * A payment event about an attempt that waits for nothing may still be
+   * about a capture or void of its hold whose outcome is unknown or that is
+   * executing. An event about a payment whose hold has no such action (an
+   * authorization the platform already recorded, a capture or void it already
+   * applied, or one made outside the platform) is recorded and changes
+   * nothing.
+   */
+  private async processAuthorizationAction(
+    command: ReceiveProviderEventCommand,
+    account: { readonly id: string; readonly merchantId: string },
+    providerTransactionId: string,
+  ): Promise<RunOutcome> {
+    const result = await this.resolveAuthorizationAction.executeForProvider({
+      actor: WEBHOOK_ACTOR,
+      correlationId: command.correlationId,
+      merchantId: account.merchantId,
+      lookupTimeoutMs: WEBHOOK_LOOKUP_TIMEOUT_MILLIS,
+      processorAccountId: account.id,
+      providerTransactionId,
+      present: command.presentAuthorizationAction,
+    });
+    switch (result.outcome) {
+      case 'RESOLVED':
+        return { outcome: 'PROCESSED', detail: result.change };
+      case 'NO_CHANGE':
+      case 'NOT_MATCHED':
+        return { outcome: 'PROCESSED', detail: 'NO_CHANGE' };
+      case 'EXECUTING':
+        return { outcome: 'FAILED', detail: 'OBJECT_EXECUTING' };
+      case 'LOOKUP_UNAVAILABLE':
+      case 'CREDENTIALS_KEY_NOT_CONFIGURED':
+      case 'PROVIDER_UNSUPPORTED':
+      case 'LOCK_TIMEOUT':
+        return { outcome: 'FAILED', detail: result.outcome };
+    }
   }
 }

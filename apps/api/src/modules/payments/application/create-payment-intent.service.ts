@@ -7,6 +7,7 @@ import {
 } from '@merchantflow/database';
 import {
   toAmountMinorString,
+  type CaptureMode,
   type PaymentIntent,
   type PositiveMoney,
 } from '@merchantflow/domain';
@@ -45,6 +46,8 @@ export interface CreatePaymentIntentCommand {
   readonly amount: PositiveMoney;
   /** Already checked against the format of `payment_intents`. */
   readonly merchantReference: string;
+  /** How a successful payment of the intent is captured. */
+  readonly captureMode: CaptureMode;
   /**
    * Builds the response for the created intent. It is returned and stored
    * under the key in the same transaction, so a retry receives exactly it.
@@ -137,6 +140,7 @@ export class CreatePaymentIntentService {
       merchantId: principal.merchantId,
       amount: command.amount,
       merchantReference: command.merchantReference,
+      captureMode: command.captureMode,
       status: 'CREATED',
       createdAt: now,
       updatedAt: now,
@@ -169,10 +173,15 @@ export class CreatePaymentIntentService {
       operationId: intent.id,
       // The validated values in their one accepted spelling, never the raw
       // body, so the fingerprint ignores key order, whitespace, and headers.
+      // The capture mode enters the fingerprint only when it is MANUAL: every
+      // request stored before the mode existed was AUTOMATIC, so an AUTOMATIC
+      // request, with the mode sent or left out, keeps the fingerprint those
+      // requests have.
       request: {
         amount_minor: toAmountMinorString(intent.amount),
         currency: intent.amount.currency,
         merchant_reference: intent.merchantReference,
+        ...(intent.captureMode === 'MANUAL' ? { capture_mode: 'MANUAL' } : {}),
       },
     });
     switch (claim.outcome) {

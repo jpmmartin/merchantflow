@@ -1,4 +1,5 @@
 import type {
+  AuthorizationActionStatus,
   PaymentAttemptStatus,
   PaymentIntentStatus,
   RefundStatus,
@@ -13,6 +14,8 @@ const STATUS_CLASS: Readonly<Record<PaymentIntentStatus, string>> = {
   UNKNOWN: 'text-bg-warning',
   PARTIALLY_REFUNDED: 'text-bg-dark',
   REFUNDED: 'text-bg-dark',
+  REQUIRES_CAPTURE: 'text-bg-primary',
+  CANCELED: 'text-bg-secondary',
 };
 
 const ATTEMPT_STATUS_CLASS: Readonly<Record<PaymentAttemptStatus, string>> = {
@@ -22,7 +25,17 @@ const ATTEMPT_STATUS_CLASS: Readonly<Record<PaymentAttemptStatus, string>> = {
   DECLINED: 'text-bg-danger',
   FAILED: 'text-bg-danger',
   UNKNOWN: 'text-bg-warning',
+  AUTHORIZED: 'text-bg-primary',
+  CANCELED: 'text-bg-secondary',
 };
+
+const ACTION_STATUS_CLASS: Readonly<Record<AuthorizationActionStatus, string>> =
+  {
+    EXECUTING: 'text-bg-info',
+    SUCCEEDED: 'text-bg-success',
+    FAILED: 'text-bg-danger',
+    UNKNOWN: 'text-bg-warning',
+  };
 
 const REFUND_STATUS_CLASS: Readonly<Record<RefundStatus, string>> = {
   EXECUTING: 'text-bg-info',
@@ -60,5 +73,16 @@ export function RefundStatusBadge({
 }) {
   return (
     <span className={`badge ${REFUND_STATUS_CLASS[status]}`}>{status}</span>
+  );
+}
+
+/** A capture or void status as a coloured badge. */
+export function AuthorizationActionStatusBadge({
+  status,
+}: {
+  readonly status: AuthorizationActionStatus;
+}) {
+  return (
+    <span className={`badge ${ACTION_STATUS_CLASS[status]}`}>{status}</span>
   );
 }

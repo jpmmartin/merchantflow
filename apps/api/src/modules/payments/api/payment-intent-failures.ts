@@ -6,13 +6,16 @@ import {
 } from '@merchantflow/domain';
 import { ApiException } from '../../errors/api/api-exception.js';
 import type { ValidationIssue } from '../../errors/api/error-response.js';
+import type { ActOnAuthorizationFailureCode } from '../application/act-on-authorization.service.js';
 import type { CompletePaymentActionFailureCode } from '../application/complete-payment-action.service.js';
 import type { ConfirmPaymentIntentFailureCode } from '../application/confirm-payment-intent.service.js';
 import type { CreatePaymentIntentFailureCode } from '../application/create-payment-intent.service.js';
 import type { GetPaymentIntentResult } from '../application/get-payment-intent.service.js';
+import type { ListAuthorizationActionsResult } from '../application/list-authorization-actions.service.js';
 import type { ListPaymentAttemptsResult } from '../application/list-payment-attempts.service.js';
 import type { ListPaymentIntentsResult } from '../application/list-payment-intents.service.js';
 import type { ListRefundsResult } from '../application/list-refunds.service.js';
+import type { RefreshAuthorizationActionFailureCode } from '../application/refresh-authorization-action.service.js';
 import type { RefreshRefundFailureCode } from '../application/refresh-refund.service.js';
 import type { RefundPaymentIntentFailureCode } from '../application/refund-payment-intent.service.js';
 import type { CreatePaymentIntentBody } from './payment-intent.schemas.js';
@@ -236,6 +239,72 @@ export function toRefreshRefundApiException(
       return new ApiException('NOT_FOUND');
     case 'NOT_REFRESHABLE':
       return new ApiException('REFUND_NOT_REFRESHABLE');
+    case 'LOOKUP_UNAVAILABLE':
+      return new ApiException('PROCESSOR_LOOKUP_UNAVAILABLE');
+    case 'CREDENTIALS_KEY_NOT_CONFIGURED':
+      return new ApiException('CREDENTIALS_KEY_NOT_CONFIGURED');
+    case 'PROVIDER_UNSUPPORTED':
+      return new ApiException('PROCESSOR_PROVIDER_UNSUPPORTED');
+    case 'LOCK_TIMEOUT':
+      return new ApiException('OPERATION_TIMEOUT');
+  }
+}
+
+/** The exception for a refused capture or void. */
+export function toAuthorizationActionApiException(
+  code: ActOnAuthorizationFailureCode,
+): ApiException {
+  switch (code) {
+    case 'FORBIDDEN':
+      return new ApiException('INSUFFICIENT_ROLE');
+    case 'NOT_FOUND':
+      return new ApiException('NOT_FOUND');
+    case 'MERCHANT_NOT_ACTIVE':
+      return new ApiException('MERCHANT_NOT_ACTIVE');
+    case 'OPERATION_IN_PROGRESS':
+      return new ApiException('OPERATION_IN_PROGRESS');
+    case 'KEY_REUSED':
+      return new ApiException('IDEMPOTENCY_KEY_REUSED');
+    case 'LOCK_TIMEOUT':
+      return new ApiException('OPERATION_TIMEOUT');
+    case 'ACTION_IN_PROGRESS':
+      return new ApiException('AUTHORIZATION_ACTION_IN_PROGRESS');
+    case 'ACTION_OUTCOME_UNKNOWN':
+      return new ApiException('AUTHORIZATION_ACTION_OUTCOME_UNKNOWN');
+    case 'NOT_CAPTURABLE':
+      return new ApiException('PAYMENT_INTENT_NOT_CAPTURABLE');
+    case 'NOT_VOIDABLE':
+      return new ApiException('PAYMENT_INTENT_NOT_VOIDABLE');
+    case 'CREDENTIALS_KEY_NOT_CONFIGURED':
+      return new ApiException('CREDENTIALS_KEY_NOT_CONFIGURED');
+    case 'PROVIDER_UNSUPPORTED':
+      return new ApiException('PROCESSOR_PROVIDER_UNSUPPORTED');
+  }
+}
+
+/** The exception for a refused list of captures and voids. */
+export function toListAuthorizationActionsApiException(
+  code: Extract<ListAuthorizationActionsResult, { ok: false }>['code'],
+): ApiException {
+  switch (code) {
+    case 'FORBIDDEN':
+      return new ApiException('INSUFFICIENT_ROLE');
+    case 'NOT_FOUND':
+      return new ApiException('NOT_FOUND');
+  }
+}
+
+/** The exception for a refused check of a capture or void. */
+export function toRefreshAuthorizationActionApiException(
+  code: RefreshAuthorizationActionFailureCode,
+): ApiException {
+  switch (code) {
+    case 'FORBIDDEN':
+      return new ApiException('INSUFFICIENT_ROLE');
+    case 'NOT_FOUND':
+      return new ApiException('NOT_FOUND');
+    case 'NOT_REFRESHABLE':
+      return new ApiException('AUTHORIZATION_ACTION_NOT_REFRESHABLE');
     case 'LOOKUP_UNAVAILABLE':
       return new ApiException('PROCESSOR_LOOKUP_UNAVAILABLE');
     case 'CREDENTIALS_KEY_NOT_CONFIGURED':

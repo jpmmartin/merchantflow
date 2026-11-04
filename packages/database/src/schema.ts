@@ -116,6 +116,12 @@ export interface PaymentIntentsTable {
   amount_minor: ColumnType<bigint, bigint, never>;
   currency: ColumnType<string, string, never>;
   merchant_reference: ColumnType<string, string, never>;
+  /** `payment_intents_capture_mode_check`; immutable, defaults to `AUTOMATIC`. */
+  capture_mode: ColumnType<
+    'AUTOMATIC' | 'MANUAL',
+    'AUTOMATIC' | 'MANUAL',
+    never
+  >;
   status:
     | 'CREATED'
     | 'PROCESSING'
@@ -124,7 +130,9 @@ export interface PaymentIntentsTable {
     | 'UNKNOWN'
     | 'REQUIRES_ACTION'
     | 'PARTIALLY_REFUNDED'
-    | 'REFUNDED';
+    | 'REFUNDED'
+    | 'REQUIRES_CAPTURE'
+    | 'CANCELED';
   created_at: ColumnType<Date, Date, never>;
   updated_at: Date;
 }
@@ -248,7 +256,9 @@ export interface PaymentAttemptsTable {
     | 'SUCCEEDED'
     | 'DECLINED'
     | 'FAILED'
-    | 'UNKNOWN';
+    | 'UNKNOWN'
+    | 'AUTHORIZED'
+    | 'CANCELED';
   provider_transaction_id: string | null;
   decline_code: string | null;
   error_category:
@@ -307,6 +317,45 @@ export type RefundRow = Selectable<RefundsTable>;
 
 /** A `refunds` row as inserted. */
 export type NewRefundRow = Insertable<RefundsTable>;
+
+/**
+ * Row of `payment_authorization_actions`, owned by the payments module: a
+ * capture or void of the hold of a `MANUAL` intent. The identity columns, the
+ * action, the amount, and the currency cannot be updated, matching the
+ * `payment_authorization_actions_restrict_update` trigger, which also refuses
+ * any change of a finished action. `amount_minor` is a `BIGINT` greater than
+ * zero, read as a `bigint`. `status` lists the values of
+ * `payment_authorization_actions_status_check` and `error_category` those of
+ * `payment_authorization_actions_error_category_check`.
+ */
+export interface PaymentAuthorizationActionsTable {
+  id: ColumnType<string, string, never>;
+  merchant_id: ColumnType<string, string, never>;
+  payment_intent_id: ColumnType<string, string, never>;
+  payment_attempt_id: ColumnType<string, string, never>;
+  processor_account_id: ColumnType<string, string, never>;
+  action: ColumnType<'CAPTURE' | 'VOID', 'CAPTURE' | 'VOID', never>;
+  operation_id: ColumnType<string, string, never>;
+  idempotency_record_id: ColumnType<string, string, never>;
+  amount_minor: ColumnType<bigint, bigint, never>;
+  currency: ColumnType<string, string, never>;
+  status: 'EXECUTING' | 'SUCCEEDED' | 'FAILED' | 'UNKNOWN';
+  failure_code: string | null;
+  error_category:
+    | 'CONFIGURATION'
+    | 'NETWORK'
+    | 'GATEWAY'
+    | 'ISSUER_DECLINE'
+    | 'INVALID_REQUEST'
+    | 'UNKNOWN'
+    | null;
+  created_at: ColumnType<Date, Date, never>;
+  updated_at: Date;
+}
+
+/** A `payment_authorization_actions` row as selected. */
+export type PaymentAuthorizationActionRow =
+  Selectable<PaymentAuthorizationActionsTable>;
 
 /**
  * Row of `ledger_accounts`, owned by the ledger module. No column has an update
@@ -410,6 +459,7 @@ export interface DatabaseSchema {
   processor_accounts: ProcessorAccountsTable;
   payment_attempts: PaymentAttemptsTable;
   refunds: RefundsTable;
+  payment_authorization_actions: PaymentAuthorizationActionsTable;
   ledger_accounts: LedgerAccountsTable;
   journal_entries: JournalEntriesTable;
   journal_lines: JournalLinesTable;

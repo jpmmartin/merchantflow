@@ -48,6 +48,11 @@ export const ERROR_CODES = [
   'WEBHOOK_REJECTED',
   'WEBHOOK_PROCESSING_FAILED',
   'REFUND_NOT_REFRESHABLE',
+  'PAYMENT_INTENT_NOT_CAPTURABLE',
+  'PAYMENT_INTENT_NOT_VOIDABLE',
+  'AUTHORIZATION_ACTION_IN_PROGRESS',
+  'AUTHORIZATION_ACTION_OUTCOME_UNKNOWN',
+  'AUTHORIZATION_ACTION_NOT_REFRESHABLE',
   'PAYLOAD_TOO_LARGE',
   'UNSUPPORTED_MEDIA_TYPE',
   'REQUEST_REJECTED',
@@ -247,8 +252,9 @@ export const ERROR_DEFINITIONS: Readonly<Record<ErrorCode, ErrorDefinition>> = {
     status: 409,
     message: 'Another attempt of this payment is still in progress.',
   },
-  // The payment intent is in a final status (SUCCEEDED, FAILED,
-  // PARTIALLY_REFUNDED, or REFUNDED); none accepts a new attempt.
+  // The payment intent is past its payment attempts (SUCCEEDED, FAILED,
+  // PARTIALLY_REFUNDED, REFUNDED, REQUIRES_CAPTURE, or CANCELED); none accepts
+  // a new attempt.
   PAYMENT_INTENT_NOT_CONFIRMABLE: {
     status: 409,
     message: 'The payment is in a final status and cannot be confirmed.',
@@ -344,6 +350,41 @@ export const ERROR_DEFINITIONS: Readonly<Record<ErrorCode, ErrorDefinition>> = {
     status: 409,
     message:
       'The refund cannot be checked with the processor yet: it is still executing or has no processor identifier.',
+  },
+  // Only an authorized MANUAL payment (REQUIRES_CAPTURE) can be captured;
+  // AUTOMATIC payments are captured when they are confirmed.
+  PAYMENT_INTENT_NOT_CAPTURABLE: {
+    status: 409,
+    message:
+      'The payment cannot be captured: only an authorized payment waiting for capture can be.',
+  },
+  // Only an authorized MANUAL payment (REQUIRES_CAPTURE) has a hold to void;
+  // a captured payment is refunded instead.
+  PAYMENT_INTENT_NOT_VOIDABLE: {
+    status: 409,
+    message:
+      'The payment cannot be voided: only an authorized payment waiting for capture can be.',
+  },
+  // Another capture or void of the payment intent is executing; capture and
+  // void of one payment exclude each other.
+  AUTHORIZATION_ACTION_IN_PROGRESS: {
+    status: 409,
+    message: 'Another capture or void of this payment is still in progress.',
+  },
+  // A capture or void of the payment intent may have changed the hold and its
+  // outcome is not known yet, so no new capture or void can start under any
+  // key until it is resolved.
+  AUTHORIZATION_ACTION_OUTCOME_UNKNOWN: {
+    status: 409,
+    message:
+      'An earlier capture or void of this payment has an unknown outcome; do not capture or void again until it is resolved.',
+  },
+  // The capture or void cannot be checked with the processor while its own
+  // request is still executing.
+  AUTHORIZATION_ACTION_NOT_REFRESHABLE: {
+    status: 409,
+    message:
+      'The capture or void cannot be checked with the processor yet: it is still executing.',
   },
   PAYLOAD_TOO_LARGE: {
     status: 413,

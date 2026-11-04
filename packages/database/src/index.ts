@@ -39,6 +39,8 @@ export type {
   NewRefundRow,
   PaymentAttemptRow,
   PaymentAttemptsTable,
+  PaymentAuthorizationActionRow,
+  PaymentAuthorizationActionsTable,
   PaymentIntentRow,
   PaymentIntentsTable,
   ProcessorAccountRow,

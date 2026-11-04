@@ -150,9 +150,9 @@ export async function listPaymentAttempts(
 }
 
 /**
- * The successful attempt of an intent of the merchant, or `undefined`. The
- * partial unique index `payment_attempts_one_succeeded_per_intent_idx` allows
- * at most one.
+ * The successful (captured) attempt of an intent of the merchant, or
+ * `undefined`. The partial unique index
+ * `payment_attempts_one_succeeded_per_intent_idx` allows at most one.
  */
 export async function findSucceededPaymentAttempt(
   db: Database,
@@ -215,6 +215,26 @@ export async function findPaymentAttemptById(
     .selectAll()
     .where('merchant_id', '=', key.merchantId)
     .where('id', '=', key.id)
+    .executeTakeFirst();
+  return row === undefined ? undefined : toPaymentAttempt(row);
+}
+
+/**
+ * The authorized attempt of a `MANUAL` intent of the merchant, whose hold a
+ * capture or void acts on, or `undefined`. The partial unique index
+ * `payment_attempts_one_succeeded_per_intent_idx` allows at most one attempt
+ * that is authorized, succeeded, or canceled.
+ */
+export async function findAuthorizedPaymentAttempt(
+  db: Database,
+  key: { readonly merchantId: string; readonly paymentIntentId: string },
+): Promise<PaymentAttempt | undefined> {
+  const row = await db
+    .selectFrom('payment_attempts')
+    .selectAll()
+    .where('merchant_id', '=', key.merchantId)
+    .where('payment_intent_id', '=', key.paymentIntentId)
+    .where('status', '=', 'AUTHORIZED')
     .executeTakeFirst();
   return row === undefined ? undefined : toPaymentAttempt(row);
 }

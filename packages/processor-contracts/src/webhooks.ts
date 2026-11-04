@@ -98,8 +98,9 @@ export interface ProcessorEventReferences {
  * - `object`: the type and ID of the object the event is about, when it names
  *   one.
  * - `subject`: what the platform handles the event as, decided by the
- *   adapter from the provider's type: `PAYMENT` for a payment that succeeded
- *   or whose attempt failed, `REFUND` for a refund whose status changed, and
+ *   adapter from the provider's type: `PAYMENT` for a payment that succeeded,
+ *   whose attempt failed, that was authorized for a later capture, or that
+ *   was canceled, `REFUND` for a refund whose status changed, and
  *   `null` for any other type, which the platform records and ignores.
  * - `providerTransactionId`: the provider payment the object belongs to: the
  *   payment itself, or the payment a refund returns money from.

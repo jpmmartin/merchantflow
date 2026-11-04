@@ -96,15 +96,12 @@ describe('payment_intents constraints', () => {
     await expect(insert({ currency: 'EUR' })).resolves.toBeDefined();
   });
 
-  it.each(['REQUIRES_CAPTURE', 'created', 'CANCELED'])(
-    'rejects the status %j',
-    async (status) => {
-      await expectDatabaseError(insert({ status }), {
-        code: '23514',
-        constraint: 'payment_intents_status_check',
-      });
-    },
-  );
+  it.each(['created'])('rejects the status %j', async (status) => {
+    await expectDatabaseError(insert({ status }), {
+      code: '23514',
+      constraint: 'payment_intents_status_check',
+    });
+  });
 
   it.each([
     'CREATED',
@@ -113,6 +110,8 @@ describe('payment_intents constraints', () => {
     'FAILED',
     'UNKNOWN',
     'REQUIRES_ACTION',
+    'REQUIRES_CAPTURE',
+    'CANCELED',
   ])('accepts the status %s', async (status) => {
     await expect(insert({ status })).resolves.toBeDefined();
   });
@@ -169,7 +168,8 @@ describe('payment_intents constraints', () => {
   it('has no default on any column', async () => {
     const result = await postgres.client.query<{ column_name: string }>(
       `select column_name from information_schema.columns
-       where table_name = 'payment_intents' and column_default is not null`,
+       where table_name = 'payment_intents' and column_default is not null
+         and column_name <> 'capture_mode'`,
     );
     expect(result.rows).toEqual([]);
   });

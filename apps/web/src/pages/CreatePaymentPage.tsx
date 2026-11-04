@@ -3,7 +3,11 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router';
 import type { CurrentPrincipal } from '../api/auth';
 import { getMerchant } from '../api/merchants';
-import { createPaymentIntent, type NewPaymentIntent } from '../api/payments';
+import {
+  createPaymentIntent,
+  type CaptureMode,
+  type NewPaymentIntent,
+} from '../api/payments';
 import { ErrorAlert } from '../components/ErrorAlert';
 import { decimalAmountMessage, decimalToAmountMinor } from '../money/amount';
 
@@ -15,9 +19,12 @@ interface PendingOrder {
 
 /** The values the API compares to decide whether a request is the same one. */
 function fingerprintOf(order: NewPaymentIntent): string {
-  return [order.amount_minor, order.currency, order.merchant_reference].join(
-    '\n',
-  );
+  return [
+    order.amount_minor,
+    order.currency,
+    order.merchant_reference,
+    order.capture_mode,
+  ].join('\n');
 }
 
 type CurrencyState =
@@ -29,7 +36,9 @@ type CurrencyState =
  * The form that creates a payment order of the signed-in merchant user's
  * merchant. The amount is typed in major units and converted to minor units
  * as text before sending; the currency is the merchant's default currency and
- * cannot be changed.
+ * cannot be changed. The capture mode is automatic by default; a manual order
+ * is only authorized when it is paid, and is captured or voided afterwards on
+ * its page.
  *
  * The `Idempotency-Key` is generated once per order: a resend of the same
  * values (after a network error, a 503, or any other failure) reuses it, so a
@@ -50,6 +59,7 @@ export function CreatePaymentPage({
   });
   const [amount, setAmount] = useState('');
   const [reference, setReference] = useState('');
+  const [captureMode, setCaptureMode] = useState<CaptureMode>('AUTOMATIC');
   const [amountError, setAmountError] = useState<string | undefined>(undefined);
   const [pending, setPending] = useState<PendingOrder | undefined>(undefined);
   const [submitting, setSubmitting] = useState(false);
@@ -93,6 +103,7 @@ export function CreatePaymentPage({
           amount_minor: converted.amountMinor,
           currency: supportedCurrency,
           merchant_reference: reference,
+          capture_mode: captureMode,
         })
       : undefined;
 
@@ -107,6 +118,7 @@ export function CreatePaymentPage({
       amount_minor: parsed.amountMinor,
       currency: supportedCurrency,
       merchant_reference: reference,
+      capture_mode: captureMode,
     };
     const fingerprint = fingerprintOf(order);
     const sending =
@@ -215,6 +227,44 @@ export function CreatePaymentPage({
             spaces. Each reference can be used for one order only.
           </div>
         </div>
+        <fieldset className="mb-3">
+          <legend className="form-label fs-6 mb-1">Capture</legend>
+          <div className="form-check">
+            <input
+              id="capture_mode_automatic"
+              className="form-check-input"
+              type="radio"
+              name="capture_mode"
+              value="AUTOMATIC"
+              checked={captureMode === 'AUTOMATIC'}
+              onChange={() => setCaptureMode('AUTOMATIC')}
+            />
+            <label
+              htmlFor="capture_mode_automatic"
+              className="form-check-label"
+            >
+              Automatic: the payment is captured as soon as it succeeds
+            </label>
+          </div>
+          <div className="form-check">
+            <input
+              id="capture_mode_manual"
+              className="form-check-input"
+              type="radio"
+              name="capture_mode"
+              value="MANUAL"
+              checked={captureMode === 'MANUAL'}
+              onChange={() => setCaptureMode('MANUAL')}
+            />
+            <label htmlFor="capture_mode_manual" className="form-check-label">
+              Manual: the payment is only authorized and the funds are held;
+              capture or void it later on its page
+            </label>
+          </div>
+          <div className="form-text">
+            Stripe releases an uncaptured card authorization after seven days.
+          </div>
+        </fieldset>
         {pending === undefined ||
         submitting ||
         pending.fingerprint !== currentFingerprint ? null : (

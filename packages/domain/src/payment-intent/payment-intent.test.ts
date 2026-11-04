@@ -17,15 +17,10 @@ describe('PAYMENT_INTENT_STATUSES', () => {
       'REQUIRES_ACTION',
       'PARTIALLY_REFUNDED',
       'REFUNDED',
+      'REQUIRES_CAPTURE',
+      'CANCELED',
     ]);
   });
-
-  it.each(['REQUIRES_CAPTURE', 'CANCELED'])(
-    'does not include the later status %s',
-    (status) => {
-      expect(PAYMENT_INTENT_STATUSES).not.toContain(status);
-    },
-  );
 });
 
 describe('PaymentIntent', () => {
@@ -38,6 +33,7 @@ describe('PaymentIntent', () => {
       merchantId: '5d1c1d52-83f5-4a39-a3ad-0c1e8a1f2b77',
       amount: parsed.money,
       merchantReference: 'order-1001',
+      captureMode: 'AUTOMATIC',
       status,
       createdAt: new Date('2026-11-03T10:00:00.000Z'),
       updatedAt: new Date('2026-11-03T10:00:00.000Z'),
@@ -55,8 +51,9 @@ describe('PaymentIntent', () => {
       // @ts-expect-error plain Money may be zero or negative, a payment amount may not
       amount: zero.money,
       merchantReference: 'order',
-      // @ts-expect-error REQUIRES_CAPTURE is not a status yet
-      status: 'REQUIRES_CAPTURE',
+      captureMode: 'AUTOMATIC',
+      // @ts-expect-error SETTLED is not a status
+      status: 'SETTLED',
       createdAt: new Date(0),
       updatedAt: new Date(0),
     };

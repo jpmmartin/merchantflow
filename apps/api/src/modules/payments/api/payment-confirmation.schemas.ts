@@ -40,7 +40,7 @@ export const paymentAttemptResponseSchema = z.object({
   status: z
     .enum(PAYMENT_ATTEMPT_STATUSES)
     .describe(
-      'EXECUTING, REQUIRES_ACTION, and UNKNOWN are open and block a new attempt; SUCCEEDED, DECLINED, and FAILED are final.',
+      'EXECUTING, REQUIRES_ACTION, and UNKNOWN are open and block a new attempt. AUTHORIZED holds the funds of a MANUAL payment until it is captured (SUCCEEDED) or voided (CANCELED). SUCCEEDED (captured), DECLINED, FAILED, and CANCELED are final.',
     ),
   provider_transaction_id: z
     .string()

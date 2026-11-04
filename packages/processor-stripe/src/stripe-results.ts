@@ -1,4 +1,5 @@
 import type {
+  ProcessorAuthorizationActionResult,
   ProcessorErrorCategory,
   ProcessorPaymentResult,
   ProcessorRefundResult,
@@ -40,16 +41,22 @@ const UNKNOWN_OUTCOME = {
  * Normalizes a PaymentIntent that Stripe returned. Only what the PaymentIntent
  * proves becomes a business outcome:
  *
- * - `succeeded`: the payment was captured (automatic capture);
+ * - `succeeded`: the payment was captured, at once (automatic capture) or by
+ *   a capture of its hold (manual capture);
+ * - `requires_capture` of a PaymentIntent whose `capture_method` is `manual`:
+ *   `authorized`, the funds are held and not captured;
+ * - `canceled`: `canceled`, the PaymentIntent can no longer charge, and a hold
+ *   it had was released;
  * - `requires_action` with a client secret: the customer must authenticate,
  *   and the secret lets Stripe.js run the step;
  * - `requires_payment_method` after a failed confirmation (with a
  *   `last_payment_error`): the payment failed and nothing was charged, which is
  *   a decline, with Stripe's decline code or error code.
  *
- * Every other status (`processing`, `requires_confirmation`,
- * `requires_capture`, `canceled`), a PaymentIntent without the data its status
- * needs, and any object in live mode are `unknown`, never a decline.
+ * Every other status (`processing`, `requires_confirmation`, and
+ * `requires_capture` of a PaymentIntent that is not manual-capture), a
+ * PaymentIntent without the data its status needs, and any object in live
+ * mode are `unknown`, never a decline.
  */
 export function paymentIntentResult(
   intent: Stripe.PaymentIntent,
@@ -68,6 +75,12 @@ export function paymentIntentResult(
   switch (intent.status) {
     case 'succeeded':
       return { status: 'succeeded', providerTransactionId };
+    case 'requires_capture':
+      return intent.capture_method === 'manual'
+        ? { status: 'authorized', providerTransactionId }
+        : { ...UNKNOWN_OUTCOME, providerTransactionId };
+    case 'canceled':
+      return { status: 'canceled', providerTransactionId };
     case 'requires_action':
       if (
         typeof intent.client_secret === 'string' &&
@@ -320,6 +333,107 @@ export function refundErrorResult(error: unknown): ProcessorRefundResult {
   }
   if (error instanceof Stripe.errors.StripeError) {
     return { ...REFUND_UNKNOWN, providerRefundId: null };
+  }
+  throw error;
+}
+
+/** What a capture or void answer must match: the PaymentIntent acted on. */
+export interface ExpectedAuthorizationAction {
+  readonly paymentIntentId: string;
+  /** For a capture: the amount captured and its currency, as sent. */
+  readonly captured?: { readonly amount: number; readonly currency: string };
+}
+
+const ACTION_UNKNOWN = { status: 'unknown', category: 'UNKNOWN' } as const;
+
+/**
+ * Normalizes the PaymentIntent that `paymentIntents.capture` returned. Only a
+ * test-mode PaymentIntent with the ID sent, `capture_method` `manual`, status
+ * `succeeded`, and `amount_received` and `currency` equal to what was sent
+ * proves the capture: `succeeded`. Live mode is `unknown` with the category
+ * `CONFIGURATION`, and any other answer is `unknown`.
+ */
+export function captureResult(
+  intent: Stripe.PaymentIntent,
+  expected: ExpectedAuthorizationAction,
+): ProcessorAuthorizationActionResult {
+  if (intent.livemode) return { status: 'unknown', category: 'CONFIGURATION' };
+  const captured = expected.captured;
+  if (
+    captured !== undefined &&
+    intent.id === expected.paymentIntentId &&
+    intent.capture_method === 'manual' &&
+    intent.status === 'succeeded' &&
+    intent.amount_received === captured.amount &&
+    intent.currency === captured.currency
+  ) {
+    return { status: 'succeeded' };
+  }
+  return ACTION_UNKNOWN;
+}
+
+/**
+ * Normalizes the PaymentIntent that `paymentIntents.cancel` returned. Only a
+ * test-mode PaymentIntent with the ID sent and status `canceled` proves the
+ * hold was released: `succeeded`. Live mode is `unknown` with the category
+ * `CONFIGURATION`, and any other answer is `unknown`.
+ */
+export function voidResult(
+  intent: Stripe.PaymentIntent,
+  expected: ExpectedAuthorizationAction,
+): ProcessorAuthorizationActionResult {
+  if (intent.livemode) return { status: 'unknown', category: 'CONFIGURATION' };
+  if (intent.id === expected.paymentIntentId && intent.status === 'canceled') {
+    return { status: 'succeeded' };
+  }
+  return ACTION_UNKNOWN;
+}
+
+/**
+ * Normalizes an error of `paymentIntents.capture` or `paymentIntents.cancel`
+ * by its class, never by its message:
+ *
+ * - an authentication or permission error (401, 403) is `failed` with the
+ *   category `CONFIGURATION`, and an invalid request (400, 404; for example a
+ *   PaymentIntent whose authorization expired or that is no longer
+ *   `requires_capture`) is `failed` with `INVALID_REQUEST` and Stripe's error
+ *   code: Stripe refused the request and changed nothing;
+ * - a broken connection or timeout, a server error, a conflict, a rate limit,
+ *   an idempotency error, a card error, and any other Stripe error are
+ *   `unknown`: the request, or a retry of it, may have been executed.
+ *
+ * An error that is not a Stripe error is a defect and is thrown again.
+ */
+export function authorizationActionErrorResult(
+  error: unknown,
+): ProcessorAuthorizationActionResult {
+  if (
+    error instanceof Stripe.errors.StripeAuthenticationError ||
+    error instanceof Stripe.errors.StripePermissionError
+  ) {
+    return { status: 'failed', category: 'CONFIGURATION', failureCode: null };
+  }
+  if (error instanceof Stripe.errors.StripeIdempotencyError) {
+    return ACTION_UNKNOWN;
+  }
+  if (error instanceof Stripe.errors.StripeInvalidRequestError) {
+    return {
+      status: 'failed',
+      category: 'INVALID_REQUEST',
+      failureCode: declineCodeOf(error.code),
+    };
+  }
+  if (error instanceof Stripe.errors.StripeConnectionError) {
+    return { status: 'unknown', category: 'NETWORK' };
+  }
+  if (
+    error instanceof Stripe.errors.StripeAPIError ||
+    error instanceof Stripe.errors.StripeRateLimitError
+  ) {
+    return { status: 'unknown', category: 'GATEWAY' };
+  }
+  if (error instanceof Stripe.errors.StripeError) {
+    return ACTION_UNKNOWN;
   }
   throw error;
 }

@@ -1,10 +1,12 @@
 import type {
+  CaptureInput,
   CreateWebhookEndpointInput,
   CredentialValidationResult,
   DeleteWebhookEndpointInput,
   GetRefundInput,
   GetTransactionInput,
   ProcessorAdapter,
+  ProcessorAuthorizationActionResult,
   ProcessorCapability,
   ProcessorCredentials,
   ProcessorPaymentResult,
@@ -14,6 +16,7 @@ import type {
   RefundInput,
   SaleInput,
   VerifyWebhookEventInput,
+  VoidInput,
   WebhookEndpointCreation,
   WebhookEndpointDeletion,
   WebhookEventVerification,
@@ -24,12 +27,15 @@ import { checkStripeKey } from './stripe-keys.js';
 import {
   PAYMENT_INTENT_ID,
   PAYMENT_METHOD_ID,
+  authorizationActionErrorResult,
+  captureResult,
   lookupErrorResult,
   paymentIntentResult,
   refundErrorResult,
   refundResult,
   saleErrorResult,
   unavailableCategoryOf,
+  voidResult,
 } from './stripe-results.js';
 import {
   STRIPE_WEBHOOK_EVENT_TYPES,
@@ -78,6 +84,14 @@ const SALE_MAX_NETWORK_RETRIES = 2;
 const REFUND_MAX_NETWORK_RETRIES = 2;
 
 /**
+ * Automatic retries of a capture or a void, on the same conditions as a sale.
+ * Every try sends the action's operation ID as the same `Idempotency-Key`, so
+ * Stripe answers a retry of an executed capture or void with its first result
+ * instead of acting again. Both use the sale's timeout.
+ */
+const AUTHORIZATION_ACTION_MAX_NETWORK_RETRIES = 2;
+
+/**
  * Automatic retries of a webhook endpoint creation. Every try sends the
  * request's operation ID as the same `Idempotency-Key`, so a retry cannot
  * create a second endpoint.
@@ -105,6 +119,9 @@ export class StripeAdapter implements ProcessorAdapter {
   readonly capabilities: ReadonlySet<ProcessorCapability> = new Set([
     'CREDENTIAL_VALIDATION',
     'SALE',
+    'AUTHORIZATION',
+    'CAPTURE',
+    'VOID',
     'REFUND',
     'PARTIAL_REFUND',
     'TRANSACTION_LOOKUP',
@@ -194,6 +211,24 @@ export class StripeAdapter implements ProcessorAdapter {
    * that `toStripeAmount` refuses.
    */
   async sale(input: SaleInput): Promise<ProcessorPaymentResult> {
+    return this.createAndConfirm(input, 'automatic');
+  }
+
+  /**
+   * Like `sale`, with `capture_method: 'manual'`: Stripe authorizes the
+   * payment and holds the funds, and the PaymentIntent ends in
+   * `requires_capture` (normalized as `authorized`), or in `requires_action`
+   * while the customer must authenticate first. Stripe cancels an uncaptured
+   * card authorization after seven days by default.
+   */
+  async authorize(input: SaleInput): Promise<ProcessorPaymentResult> {
+    return this.createAndConfirm(input, 'manual');
+  }
+
+  private async createAndConfirm(
+    input: SaleInput,
+    captureMethod: 'automatic' | 'manual',
+  ): Promise<ProcessorPaymentResult> {
     if (checkStripeKey(input.credentials.secretKey, 'secret') !== undefined) {
       return { status: 'failed_before_execution', category: 'CONFIGURATION' };
     }
@@ -219,7 +254,7 @@ export class StripeAdapter implements ProcessorAdapter {
           // The SDK's API version (2026-10-28.endive) names the list of
           // accepted payment method types `allowed_payment_method_types`.
           allowed_payment_method_types: ['card'],
-          capture_method: 'automatic',
+          capture_method: captureMethod,
           confirm: true,
           use_stripe_sdk: true,
           metadata: {
@@ -234,6 +269,96 @@ export class StripeAdapter implements ProcessorAdapter {
       return saleErrorResult(error);
     }
     return paymentIntentResult(intent);
+  }
+
+  /**
+   * Captures the whole amount of an authorized PaymentIntent
+   * (`POST /v1/payment_intents/:id/capture` with `amount_to_capture`), with the
+   * action's operation ID as the idempotency key of every try and the
+   * platform's action ID added to the PaymentIntent's metadata. Only an
+   * answer that shows the PaymentIntent `succeeded` with the amount sent
+   * received proves the capture.
+   *
+   * Refused before any call, as `failed`: a key that is not a test secret key
+   * (`CONFIGURATION`), a transaction that is not a `pi_` ID, and an amount
+   * that `toStripeAmount` refuses (`INVALID_REQUEST`).
+   */
+  async capture(
+    input: CaptureInput,
+  ): Promise<ProcessorAuthorizationActionResult> {
+    if (checkStripeKey(input.credentials.secretKey, 'secret') !== undefined) {
+      return { status: 'failed', category: 'CONFIGURATION', failureCode: null };
+    }
+    const amount = toStripeAmount(input.amount);
+    if (!PAYMENT_INTENT_ID.test(input.providerTransactionId) || !amount.ok) {
+      return {
+        status: 'failed',
+        category: 'INVALID_REQUEST',
+        failureCode: null,
+      };
+    }
+    const client = this.client(input.credentials.secretKey, {
+      timeout: this.saleTimeoutMs,
+      maxNetworkRetries: AUTHORIZATION_ACTION_MAX_NETWORK_RETRIES,
+    });
+    let intent: Stripe.PaymentIntent;
+    try {
+      intent = await client.paymentIntents.capture(
+        input.providerTransactionId,
+        {
+          amount_to_capture: amount.amount,
+          metadata: {
+            authorization_action_id: input.references.authorizationActionId,
+          },
+        },
+        { idempotencyKey: input.operationId },
+      );
+    } catch (error) {
+      return authorizationActionErrorResult(error);
+    }
+    return captureResult(intent, {
+      paymentIntentId: input.providerTransactionId,
+      captured: { amount: amount.amount, currency: amount.currency },
+    });
+  }
+
+  /**
+   * Releases the hold of an authorized PaymentIntent
+   * (`POST /v1/payment_intents/:id/cancel`), with the action's operation ID as
+   * the idempotency key of every try. No cancellation reason is sent: none of
+   * Stripe's reasons describes a merchant's decision not to capture. Only an
+   * answer that shows the PaymentIntent `canceled` proves the void.
+   *
+   * Refused before any call, as `failed`: a key that is not a test secret key
+   * (`CONFIGURATION`) and a transaction that is not a `pi_` ID
+   * (`INVALID_REQUEST`).
+   */
+  async void(input: VoidInput): Promise<ProcessorAuthorizationActionResult> {
+    if (checkStripeKey(input.credentials.secretKey, 'secret') !== undefined) {
+      return { status: 'failed', category: 'CONFIGURATION', failureCode: null };
+    }
+    if (!PAYMENT_INTENT_ID.test(input.providerTransactionId)) {
+      return {
+        status: 'failed',
+        category: 'INVALID_REQUEST',
+        failureCode: null,
+      };
+    }
+    const client = this.client(input.credentials.secretKey, {
+      timeout: this.saleTimeoutMs,
+      maxNetworkRetries: AUTHORIZATION_ACTION_MAX_NETWORK_RETRIES,
+    });
+    let intent: Stripe.PaymentIntent;
+    try {
+      intent = await client.paymentIntents.cancel(
+        input.providerTransactionId,
+        {},
+        { idempotencyKey: input.operationId },
+      );
+    } catch (error) {
+      return authorizationActionErrorResult(error);
+    }
+    return voidResult(intent, { paymentIntentId: input.providerTransactionId });
   }
 
   /**

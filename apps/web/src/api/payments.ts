@@ -1,10 +1,17 @@
 import {
+  CAPTURE_MODES,
   PAYMENT_INTENT_STATUSES,
+  type CaptureMode,
   type PaymentIntentStatus,
 } from '@merchantflow/domain';
 import { apiRequest } from './client';
 
-export { PAYMENT_INTENT_STATUSES, type PaymentIntentStatus };
+export {
+  CAPTURE_MODES,
+  PAYMENT_INTENT_STATUSES,
+  type CaptureMode,
+  type PaymentIntentStatus,
+};
 
 /** A payment intent as the API returns it; `amount_minor` is an integer string. */
 export interface PaymentIntent {
@@ -13,6 +20,7 @@ export interface PaymentIntent {
   readonly amount_minor: string;
   readonly currency: string;
   readonly merchant_reference: string;
+  readonly capture_mode: CaptureMode;
   readonly status: PaymentIntentStatus;
   readonly created_at: string;
   readonly updated_at: string;
@@ -27,6 +35,7 @@ export interface NewPaymentIntent {
   readonly amount_minor: string;
   readonly currency: string;
   readonly merchant_reference: string;
+  readonly capture_mode: CaptureMode;
 }
 
 /** Whether a text, such as a query parameter, is a payment intent status. */
@@ -80,7 +89,9 @@ export type PaymentAttemptStatus =
   | 'SUCCEEDED'
   | 'DECLINED'
   | 'FAILED'
-  | 'UNKNOWN';
+  | 'UNKNOWN'
+  | 'AUTHORIZED'
+  | 'CANCELED';
 
 /** One execution of an intent against a processor account. */
 export interface PaymentAttempt {
@@ -247,4 +258,88 @@ export async function refreshRefund(
     'POST',
     `/payment-intents/${encodeURIComponent(id)}/refunds/${encodeURIComponent(refundId)}/refresh`,
   )) as RefundRefresh;
+}
+
+/** What a capture or void does to the hold of a MANUAL payment. */
+export type AuthorizationActionKind = 'CAPTURE' | 'VOID';
+
+/** Statuses of a capture or void, as the API returns them. */
+export type AuthorizationActionStatus =
+  'EXECUTING' | 'SUCCEEDED' | 'FAILED' | 'UNKNOWN';
+
+/** One capture or void of a held payment; `amount_minor` is an integer string. */
+export interface AuthorizationAction {
+  readonly id: string;
+  readonly payment_intent_id: string;
+  readonly merchant_id: string;
+  readonly payment_attempt_id: string;
+  readonly processor_account_id: string;
+  readonly action: AuthorizationActionKind;
+  readonly amount_minor: string;
+  readonly currency: string;
+  readonly status: AuthorizationActionStatus;
+  readonly failure_code: string | null;
+  readonly error_category: string | null;
+  readonly created_at: string;
+  readonly updated_at: string;
+}
+
+/** The answer of a capture or void. */
+export interface AuthorizationActionResult {
+  readonly authorization_action: AuthorizationAction;
+  readonly payment_intent: PaymentIntent;
+  readonly attempt: PaymentAttempt;
+}
+
+export interface AuthorizationActionList {
+  readonly payment_intent_id: string;
+  readonly merchant_id: string;
+  readonly data: readonly AuthorizationAction[];
+}
+
+/**
+ * Captures or voids the hold of an intent under `idempotencyKey`. Sending the
+ * same action with the same key again returns the stored answer instead of a
+ * second capture or void.
+ */
+export async function actOnAuthorization(
+  id: string,
+  action: AuthorizationActionKind,
+  idempotencyKey: string,
+): Promise<AuthorizationActionResult> {
+  return (await apiRequest(
+    'POST',
+    `/payment-intents/${encodeURIComponent(id)}/${action === 'CAPTURE' ? 'capture' : 'void'}`,
+    { headers: { 'Idempotency-Key': idempotencyKey } },
+  )) as AuthorizationActionResult;
+}
+
+export async function listAuthorizationActions(
+  id: string,
+): Promise<AuthorizationActionList> {
+  return (await apiRequest(
+    'GET',
+    `/payment-intents/${encodeURIComponent(id)}/hold-actions`,
+  )) as AuthorizationActionList;
+}
+
+/** The answer of a capture or void check with Stripe. */
+export interface AuthorizationActionRefresh extends AuthorizationActionResult {
+  readonly change:
+    | 'CAPTURE_SUCCEEDED'
+    | 'CAPTURE_FAILED'
+    | 'VOID_SUCCEEDED'
+    | 'VOID_FAILED'
+    | null;
+}
+
+/** Checks a capture or void with Stripe and applies what Stripe proves. */
+export async function refreshAuthorizationAction(
+  id: string,
+  actionId: string,
+): Promise<AuthorizationActionRefresh> {
+  return (await apiRequest(
+    'POST',
+    `/payment-intents/${encodeURIComponent(id)}/hold-actions/${encodeURIComponent(actionId)}/refresh`,
+  )) as AuthorizationActionRefresh;
 }

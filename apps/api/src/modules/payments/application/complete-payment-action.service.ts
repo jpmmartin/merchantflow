@@ -152,7 +152,7 @@ export class CompletePaymentActionService {
       return { ok: false, code: 'LOOKUP_UNAVAILABLE' };
     }
 
-    const resolution = resolutionOf(lookup.result);
+    const resolution = resolutionOf(lookup.result, intent.captureMode);
     if (resolution.kind === 'REQUIRES_ACTION') {
       // Still waiting for the customer: nothing changes, and the browser gets
       // the client secret again to run the step.

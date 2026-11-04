@@ -14,6 +14,7 @@ import { Public } from '../../auth/api/route-access.js';
 import { ApiErrorResponses } from '../../errors/api/api-error-responses.decorator.js';
 import { ApiException } from '../../errors/api/api-exception.js';
 import { CorrelationId } from '../../logging/correlation-id.decorator.js';
+import { toAuthorizationActionResult } from '../../payments/api/authorization-action.presenter.js';
 import { toPaymentConfirmationResponse } from '../../payments/api/payment-confirmation.presenter.js';
 import { toRefundCreationResponse } from '../../payments/api/refund.presenter.js';
 import { ReceiveProviderEventService } from '../application/receive-provider-event.service.js';
@@ -49,7 +50,7 @@ export class StripeWebhookController {
   @ApiOperation({
     summary: 'Receive a Stripe webhook delivery for one processor account',
     description:
-      'Public, authenticated only by the Stripe-Signature header, which is verified on the raw body with the account’s signing secret and Stripe’s default tolerance of 300 seconds. An unknown account, a disabled one, one without a signing secret, a missing or bad signature, and a live-mode event all get the same 400 WEBHOOK_REJECTED. A verified event is stored in the inbox first, unique per account and event ID; an event already processed is acknowledged again with 200 and changes nothing. Otherwise the payment or refund it names is read from Stripe and applied with the platform’s conditional updates; other event types are recorded as ignored. If processing fails, the event stays stored as FAILED, the answer is 503 WEBHOOK_PROCESSING_FAILED, and Stripe’s redelivery processes it again. Answered within about six seconds.',
+      'Public, authenticated only by the Stripe-Signature header, which is verified on the raw body with the account’s signing secret and Stripe’s default tolerance of 300 seconds. An unknown account, a disabled one, one without a signing secret, a missing or bad signature, and a live-mode event all get the same 400 WEBHOOK_REJECTED. A verified event is stored in the inbox first, unique per account and event ID; an event already processed is acknowledged again with 200 and changes nothing. Otherwise the payment, refund, or capture or void it names is read from Stripe and applied with the platform’s conditional updates; other event types are recorded as ignored. If processing fails, the event stays stored as FAILED, the answer is 503 WEBHOOK_PROCESSING_FAILED, and Stripe’s redelivery processes it again. Answered within about six seconds.',
   })
   @ApiResponse({
     status: 200,
@@ -85,6 +86,7 @@ export class StripeWebhookController {
       signatureHeader,
       presentConfirmation: toPaymentConfirmationResponse,
       presentRefund: toRefundCreationResponse,
+      presentAuthorizationAction: toAuthorizationActionResult,
     });
     switch (result.outcome) {
       case 'REJECTED':

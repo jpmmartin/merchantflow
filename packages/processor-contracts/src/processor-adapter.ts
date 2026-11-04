@@ -1,3 +1,8 @@
+import type {
+  CaptureInput,
+  ProcessorAuthorizationActionResult,
+  VoidInput,
+} from './authorization-actions.js';
 import type { ProcessorCapability } from './capability.js';
 import type {
   CredentialValidationResult,
@@ -63,6 +68,30 @@ export interface ProcessorAdapter {
    * thrown.
    */
   sale(input: SaleInput): Promise<ProcessorPaymentResult>;
+  /**
+   * Authorizes an amount without capturing it (capability `AUTHORIZATION`):
+   * the provider holds the funds, and the result is `authorized`, or
+   * `requires_action` while the customer must authenticate first. The other
+   * outcomes, and the rules for `unknown`, `declined`, and
+   * `failed_before_execution`, are those of `sale`, as is the idempotency of
+   * `operationId`.
+   */
+  authorize(input: SaleInput): Promise<ProcessorPaymentResult>;
+  /**
+   * Captures the whole amount an authorization holds (capability `CAPTURE`).
+   * A timeout, a broken connection, a provider error, or any answer that does
+   * not prove the capture is `unknown`, never `failed`; only a proven refusal
+   * is `failed`. Repeating the call with the same `operationId` returns the
+   * provider's first result instead of capturing again. Errors that are not
+   * about the provider, such as a defect, are thrown.
+   */
+  capture(input: CaptureInput): Promise<ProcessorAuthorizationActionResult>;
+  /**
+   * Releases an authorization's hold with nothing captured (capability
+   * `VOID`), with the rules of `capture` for `unknown`, `failed`, and
+   * `operationId`.
+   */
+  void(input: VoidInput): Promise<ProcessorAuthorizationActionResult>;
   /**
    * Reads the current state of one transaction (capability
    * `TRANSACTION_LOOKUP`). It changes nothing at the provider.

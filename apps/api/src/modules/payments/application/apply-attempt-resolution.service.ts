@@ -86,6 +86,8 @@ async function targetOf(
   switch (resolution.kind) {
     case 'SUCCEEDED':
       return { to: 'SUCCEEDED' };
+    case 'AUTHORIZED':
+      return { to: 'REQUIRES_CAPTURE' };
     case 'REQUIRES_ACTION':
       return { to: 'REQUIRES_ACTION' };
     case 'UNKNOWN':
@@ -122,10 +124,11 @@ async function targetOf(
  *    read;
  * 4. for a success, the sale's journal entry through the ledger module, with
  *    the successful attempt as its source, so the same success can never post
- *    twice; a decline, a failure, a pending customer action, or an unknown
- *    outcome posts nothing;
+ *    twice; an authorization (a hold of a `MANUAL` intent, posted only when it
+ *    is captured), a decline, a failure, a pending customer action, or an
+ *    unknown outcome posts nothing;
  * 5. one audit event, without the client secret, naming the journal entry;
- * 6. for a conclusive result (succeeded, declined, failed), completion of the
+ * 6. for a conclusive result (succeeded, authorized, declined, failed), completion of the
  *    confirmation's idempotency record with the response, so a retry of the
  *    confirmation replays it. A result that requires action or is unknown
  *    leaves the record in progress.
@@ -244,7 +247,9 @@ export class ApplyAttemptResolutionService {
     };
     const response = command.present(view);
     const conclusive =
-      resolution.kind === 'SUCCEEDED' || resolution.kind === 'UNSUCCESSFUL';
+      resolution.kind === 'SUCCEEDED' ||
+      resolution.kind === 'AUTHORIZED' ||
+      resolution.kind === 'UNSUCCESSFUL';
     if (conclusive) {
       const completion = await this.completeRecord.execute(trx, {
         record: {

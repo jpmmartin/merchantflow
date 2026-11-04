@@ -49,7 +49,9 @@ export {
   type MerchantTransitionResult,
 } from './merchant/merchant-transition.js';
 export {
+  CAPTURE_MODES,
   PAYMENT_INTENT_STATUSES,
+  type CaptureMode,
   type PaymentIntent,
   type PaymentIntentStatus,
 } from './payment-intent/payment-intent.js';

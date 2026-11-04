@@ -19,6 +19,7 @@ function toRow(intent: PaymentIntent): NewPaymentIntentRow {
     amount_minor: intent.amount.amountMinor,
     currency: intent.amount.currency,
     merchant_reference: intent.merchantReference,
+    capture_mode: intent.captureMode,
     // Assigning between the row union and the domain union in both directions
     // makes the compiler reject a status that only one of them lists.
     status: intent.status,
@@ -50,6 +51,7 @@ function toPaymentIntent(row: PaymentIntentRow): PaymentIntent {
     merchantId: row.merchant_id,
     amount: amount.money,
     merchantReference: row.merchant_reference,
+    captureMode: row.capture_mode,
     status,
     createdAt: row.created_at,
     updatedAt: row.updated_at,

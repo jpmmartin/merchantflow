@@ -34,10 +34,14 @@ export interface ResolvePaymentAttemptCommand {
 }
 
 export type ResolvePaymentAttemptResult =
-  /** A conclusive result was applied: the attempt succeeded, or it failed. */
+  /**
+   * A conclusive result was applied: the attempt succeeded, was authorized
+   * (a `MANUAL` intent now `REQUIRES_CAPTURE`), or failed.
+   */
   | {
       readonly outcome: 'RESOLVED';
-      readonly detail: 'ATTEMPT_SUCCEEDED' | 'ATTEMPT_UNSUCCESSFUL';
+      readonly detail:
+        'ATTEMPT_SUCCEEDED' | 'ATTEMPT_AUTHORIZED' | 'ATTEMPT_UNSUCCESSFUL';
     }
   /**
    * The attempt is not waiting for an outcome, another writer applied one
@@ -143,7 +147,7 @@ export class ResolvePaymentAttemptService {
       );
       return { outcome: 'LOOKUP_UNAVAILABLE' };
     }
-    const resolution = resolutionOf(lookup.result);
+    const resolution = resolutionOf(lookup.result, intent.captureMode);
     if (
       resolution.kind === 'REQUIRES_ACTION' ||
       resolution.kind === 'UNKNOWN'
@@ -183,7 +187,9 @@ export class ResolvePaymentAttemptService {
       detail:
         resolution.kind === 'SUCCEEDED'
           ? 'ATTEMPT_SUCCEEDED'
-          : 'ATTEMPT_UNSUCCESSFUL',
+          : resolution.kind === 'AUTHORIZED'
+            ? 'ATTEMPT_AUTHORIZED'
+            : 'ATTEMPT_UNSUCCESSFUL',
     };
   }
 }

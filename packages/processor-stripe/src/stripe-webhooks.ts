@@ -10,11 +10,16 @@ import Stripe from 'stripe';
  * confirmed in Stripe's event type reference: a refund whose status changed
  * (`refund.updated`, sent when a pending refund succeeds) or that failed
  * (`refund.failed`, also sent when a succeeded refund fails later), and a
- * PaymentIntent that succeeded or whose payment attempt failed.
+ * PaymentIntent that succeeded (captured), whose payment attempt failed, that
+ * has funds to capture (`payment_intent.amount_capturable_updated`, sent when a
+ * manual-capture payment is authorized), or that was canceled (sent when a
+ * hold is voided or its authorization expires).
  */
 export const STRIPE_WEBHOOK_EVENT_TYPES = [
   'payment_intent.succeeded',
   'payment_intent.payment_failed',
+  'payment_intent.amount_capturable_updated',
+  'payment_intent.canceled',
   'refund.updated',
   'refund.failed',
 ] as const;
@@ -24,6 +29,8 @@ function subjectOf(type: string): 'PAYMENT' | 'REFUND' | null {
   switch (type) {
     case 'payment_intent.succeeded':
     case 'payment_intent.payment_failed':
+    case 'payment_intent.amount_capturable_updated':
+    case 'payment_intent.canceled':
       return 'PAYMENT';
     case 'refund.updated':
     case 'refund.failed':

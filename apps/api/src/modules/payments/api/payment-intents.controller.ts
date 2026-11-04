@@ -94,7 +94,7 @@ export class PaymentIntentsController {
   @ApiOperation({
     summary: 'Create a payment intent',
     description:
-      'Roles: MERCHANT_ADMIN of an ACTIVE merchant. Creates an intent in CREATED for the merchant of the key; nothing is charged. The Idempotency-Key header is required: the same key with the same request returns the stored 201 response unchanged, also after the merchant changed status, and the same key with a different request is refused. Only a created intent is stored under the key: a refused request stores nothing, so the same request can be sent again once the cause is gone.',
+      'Roles: MERCHANT_ADMIN of an ACTIVE merchant. Creates an intent in CREATED for the merchant of the key; nothing is charged. The Idempotency-Key header is required: the same key with the same request returns the stored 201 response unchanged, also after the merchant changed status, and the same key with a different request is refused. Only a created intent is stored under the key: a refused request stores nothing, so the same request can be sent again once the cause is gone. capture_mode chooses AUTOMATIC (the default: a successful payment is captured at once) or MANUAL (the payment is only authorized and ends in REQUIRES_CAPTURE, then captured or voided through /capture or /void); it never changes.',
   })
   @ApiHeader({
     name: IDEMPOTENCY_KEY_HEADER,
@@ -162,6 +162,7 @@ export class PaymentIntentsController {
       idempotencyKey,
       amount: amountOf(body),
       merchantReference: body.merchant_reference,
+      captureMode: body.capture_mode ?? 'AUTOMATIC',
       present: toCreatedPaymentIntentResponse,
     });
     if (!result.ok) throw toApiException(result.code);
@@ -289,7 +290,7 @@ export class PaymentIntentsController {
   @ApiOperation({
     summary: 'Confirm (pay) a payment intent',
     description:
-      "Roles: MERCHANT_ADMIN of an ACTIVE merchant. Charges the intent once through the merchant's default processor account, with a payment method token that the browser created with that account's publishable key; card data never reaches this API. The intent must be CREATED. The provider is called with no database transaction open, with the attempt's operation_id as its idempotency key. 200 answers SUCCEEDED, DECLINED or FAILED (the intent is back to CREATED, or FAILED at the third unsuccessful attempt), or REQUIRES_ACTION with next_action.client_secret for Stripe.js handleNextAction, followed by POST /payment-intents/{id}/complete-action. 202 answers an UNKNOWN outcome: the payment may have been charged, and the intent stays blocked until the outcome is resolved by the account's webhook (payment_intent.succeeded or payment_intent.payment_failed); automatic recovery without a webhook does not exist yet. The Idempotency-Key header is required: a conclusive answer (succeeded, declined, failed) is stored and replayed for the same key and request, also after the merchant changed status; while the attempt is REQUIRES_ACTION or UNKNOWN the same key gets 409 OPERATION_IN_PROGRESS. A refused request stores nothing. The response is not cacheable (Cache-Control: no-store).",
+      "Roles: MERCHANT_ADMIN of an ACTIVE merchant. Charges the intent once through the merchant's default processor account, with a payment method token that the browser created with that account's publishable key; card data never reaches this API. The intent must be CREATED. The provider is called with no database transaction open, with the attempt's operation_id as its idempotency key. 200 answers SUCCEEDED, DECLINED or FAILED (the intent is back to CREATED, or FAILED at the third unsuccessful attempt), or REQUIRES_ACTION with next_action.client_secret for Stripe.js handleNextAction, followed by POST /payment-intents/{id}/complete-action. 202 answers an UNKNOWN outcome: the payment may have been charged, and the intent stays blocked until the outcome is resolved by the account's webhook (payment_intent.succeeded or payment_intent.payment_failed); automatic recovery without a webhook does not exist yet. The Idempotency-Key header is required: a conclusive answer (succeeded, declined, failed) is stored and replayed for the same key and request, also after the merchant changed status; while the attempt is REQUIRES_ACTION or UNKNOWN the same key gets 409 OPERATION_IN_PROGRESS. A refused request stores nothing. The response is not cacheable (Cache-Control: no-store). For a MANUAL intent the provider only authorizes the payment: a successful confirmation ends in REQUIRES_CAPTURE with the attempt AUTHORIZED, the funds held and nothing posted to the ledger.",
   })
   @ApiHeader({
     name: IDEMPOTENCY_KEY_HEADER,
@@ -389,7 +390,7 @@ export class PaymentIntentsController {
   @ApiOperation({
     summary: 'Complete a customer action of a payment intent',
     description:
-      "Roles: MERCHANT_ADMIN. For an intent in REQUIRES_ACTION, after the browser ran the customer's step (Stripe.js handleNextAction), reads the payment from the provider and applies the result to the attempt and the intent: SUCCEEDED; DECLINED (back to CREATED, or FAILED at the third unsuccessful attempt) when authentication failed or the card was declined; or UNKNOWN (202) when the provider's state does not establish the outcome. A conclusive result is also stored as the answer of the confirmation's Idempotency-Key. Safe to call more than once: while the payment still requires action nothing changes and next_action.client_secret is returned again; once a result is applied, a further call is 409 PAYMENT_ACTION_NOT_PENDING. The merchant's status is not checked. The response is not cacheable (Cache-Control: no-store).",
+      "Roles: MERCHANT_ADMIN. For an intent in REQUIRES_ACTION, after the browser ran the customer's step (Stripe.js handleNextAction), reads the payment from the provider and applies the result to the attempt and the intent: SUCCEEDED; DECLINED (back to CREATED, or FAILED at the third unsuccessful attempt) when authentication failed or the card was declined; or UNKNOWN (202) when the provider's state does not establish the outcome. A conclusive result is also stored as the answer of the confirmation's Idempotency-Key. Safe to call more than once: while the payment still requires action nothing changes and next_action.client_secret is returned again; once a result is applied, a further call is 409 PAYMENT_ACTION_NOT_PENDING. The merchant's status is not checked. The response is not cacheable (Cache-Control: no-store). For a MANUAL intent a passed authentication ends in REQUIRES_CAPTURE with the attempt AUTHORIZED.",
   })
   @ApiResponse({
     status: 200,

@@ -96,7 +96,7 @@ export type ConfirmPaymentIntentFailureCode =
   | 'PROCESSOR_ACCOUNT_NOT_DEFAULT'
   /** No master key decrypts the account's secret. Nothing was stored. */
   | 'CREDENTIALS_KEY_NOT_CONFIGURED'
-  /** The account's provider has no adapter that can make a sale. */
+  /** The account's provider has no adapter that can make a sale, or authorize. */
   | 'PROVIDER_UNSUPPORTED';
 
 export type ConfirmPaymentIntentResult =
@@ -160,6 +160,8 @@ function statusRefusal(
     case 'FAILED':
     case 'PARTIALLY_REFUNDED':
     case 'REFUNDED':
+    case 'REQUIRES_CAPTURE':
+    case 'CANCELED':
       return 'INTENT_NOT_CONFIRMABLE';
   }
 }
@@ -198,8 +200,10 @@ function accountRefusal(
  *    rolls the whole transaction back, so the key stays free. The open
  *    attempt is found by reading, under the intent's lock: the partial unique
  *    index is a last defense, never the expected path.
- * 2. **Execute**: the adapter's `sale`, with the operation ID as the provider
- *    idempotency key. An adapter that throws is an unknown outcome.
+ * 2. **Execute**: the adapter's `sale` for an `AUTOMATIC` intent, or its
+ *    `authorize` for a `MANUAL` one, which holds the funds without capturing
+ *    them, with the operation ID as the provider idempotency key. An adapter
+ *    that throws is an unknown outcome.
  * 3. **Apply**: `ApplyAttemptResolutionService` in one short transaction.
  *
  * Attempts have no lease yet (INC-04): a crash between Reserve and Apply, or
@@ -346,7 +350,11 @@ export class ConfirmPaymentIntentService {
     });
     if (!resolved.ok) refuse(accountRefusal(resolved.code));
     const { account } = resolved;
-    const adapter = this.registry.findWithCapability(account.provider, 'SALE');
+    // A MANUAL intent is authorized only; an AUTOMATIC one is a sale.
+    const adapter = this.registry.findWithCapability(
+      account.provider,
+      intent.captureMode === 'MANUAL' ? 'AUTHORIZATION' : 'SALE',
+    );
     if (adapter === undefined) refuse('PROVIDER_UNSUPPORTED');
 
     const transition = evaluatePaymentIntentTransition(
@@ -406,18 +414,21 @@ export class ConfirmPaymentIntentService {
     reservation: Reservation,
   ): Promise<ProcessorPaymentResult> {
     const { intent, attempt, account, adapter } = reservation;
+    const input = {
+      credentials: account.credentials,
+      amount: intent.amount,
+      paymentMethod: command.paymentMethod,
+      operationId: attempt.operationId,
+      references: {
+        merchantId: intent.merchantId,
+        paymentIntentId: intent.id,
+        paymentAttemptId: attempt.id,
+      },
+    };
     try {
-      return await adapter.sale({
-        credentials: account.credentials,
-        amount: intent.amount,
-        paymentMethod: command.paymentMethod,
-        operationId: attempt.operationId,
-        references: {
-          merchantId: intent.merchantId,
-          paymentIntentId: intent.id,
-          paymentAttemptId: attempt.id,
-        },
-      });
+      return await (intent.captureMode === 'MANUAL'
+        ? adapter.authorize(input)
+        : adapter.sale(input));
     } catch (error) {
       this.logger.error(
         {
@@ -442,7 +453,7 @@ export class ConfirmPaymentIntentService {
     result: ProcessorPaymentResult,
   ): Promise<IdempotentResponse> {
     const { intent, attempt } = reservation;
-    const resolution = resolutionOf(result);
+    const resolution = resolutionOf(result, intent.captureMode);
     let applied;
     try {
       applied = await this.database
