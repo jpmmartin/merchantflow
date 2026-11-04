@@ -170,6 +170,36 @@ export interface UserSessionsTable {
 /** A `user_sessions` row as selected, with every column at its read type. */
 export type UserSessionRow = Selectable<UserSessionsTable>;
 
+/**
+ * Row of `processor_accounts`. The identity columns cannot be updated,
+ * matching the `processor_accounts_restrict_update` trigger. The secret key is
+ * present only as its AES-256-GCM ciphertext, IV, and authentication tag, which
+ * `pg` reads as `Buffer`; the master key that decrypts them is never stored.
+ */
+export interface ProcessorAccountsTable {
+  id: ColumnType<string, string, never>;
+  merchant_id: ColumnType<string, string, never>;
+  provider: ColumnType<string, string, never>;
+  display_name: string;
+  provider_account_id: ColumnType<string, string, never>;
+  publishable_key: string;
+  secret_key_ciphertext: Buffer;
+  secret_key_iv: Buffer;
+  secret_key_auth_tag: Buffer;
+  secret_key_version: number;
+  secret_key_hint: string;
+  enabled: boolean;
+  is_default: boolean;
+  created_at: ColumnType<Date, Date, never>;
+  updated_at: Date;
+}
+
+/** A `processor_accounts` row as selected, with every column at its read type. */
+export type ProcessorAccountRow = Selectable<ProcessorAccountsTable>;
+
+/** A `processor_accounts` row as inserted. */
+export type NewProcessorAccountRow = Insertable<ProcessorAccountsTable>;
+
 /** Table types of the database, keyed by table name. */
 export interface DatabaseSchema {
   merchants: MerchantsTable;
@@ -179,6 +209,7 @@ export interface DatabaseSchema {
   payment_intents: PaymentIntentsTable;
   users: UsersTable;
   user_sessions: UserSessionsTable;
+  processor_accounts: ProcessorAccountsTable;
 }
 
 /** The Kysely instance that every query and transaction goes through. */

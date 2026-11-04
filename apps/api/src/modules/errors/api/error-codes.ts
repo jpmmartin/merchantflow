@@ -24,6 +24,13 @@ export const ERROR_CODES = [
   'MERCHANT_NOT_ACTIVE',
   'MERCHANT_CURRENCY_MISMATCH',
   'DUPLICATE_MERCHANT_REFERENCE',
+  'PROCESSOR_PROVIDER_UNSUPPORTED',
+  'PROCESSOR_LIVE_CREDENTIALS_REJECTED',
+  'PROCESSOR_CREDENTIALS_INVALID',
+  'PROCESSOR_ACCOUNT_ALREADY_CONNECTED',
+  'PROCESSOR_ACCOUNT_DISABLED',
+  'PROCESSOR_UNAVAILABLE',
+  'CREDENTIALS_KEY_NOT_CONFIGURED',
   'PAYLOAD_TOO_LARGE',
   'UNSUPPORTED_MEDIA_TYPE',
   'REQUEST_REJECTED',
@@ -164,6 +171,50 @@ export const ERROR_DEFINITIONS: Readonly<Record<ErrorCode, ErrorDefinition>> = {
   DUPLICATE_MERCHANT_REFERENCE: {
     status: 409,
     message: 'A payment intent with this merchant_reference already exists.',
+  },
+  // No adapter is registered for the provider code, or the adapter cannot
+  // validate credentials.
+  PROCESSOR_PROVIDER_UNSUPPORTED: {
+    status: 422,
+    message: 'The processor provider is not supported.',
+  },
+  // A key is a live-mode key, or the provider reported live mode for it. Only
+  // test-mode credentials are accepted; nothing is stored.
+  PROCESSOR_LIVE_CREDENTIALS_REJECTED: {
+    status: 422,
+    message: 'Live-mode credentials are not accepted; use test-mode keys.',
+  },
+  // A key has the wrong format, or the provider does not accept the secret
+  // key or does not let it read the account. The provider's own message is
+  // never returned, because it can repeat part of the key.
+  PROCESSOR_CREDENTIALS_INVALID: {
+    status: 422,
+    message: 'The processor credentials are not valid.',
+  },
+  // The merchant already has this provider account connected and enabled.
+  PROCESSOR_ACCOUNT_ALREADY_CONNECTED: {
+    status: 409,
+    message: 'This processor account is already connected to the merchant.',
+  },
+  // A disabled processor account cannot become the default.
+  PROCESSOR_ACCOUNT_DISABLED: {
+    status: 409,
+    message: 'The processor account is disabled.',
+  },
+  // The provider could not be reached or gave no usable answer while the
+  // credentials were validated. Nothing was stored; the request can be sent
+  // again.
+  PROCESSOR_UNAVAILABLE: {
+    status: 503,
+    message:
+      'The processor could not validate the credentials. Nothing was changed; retry later.',
+  },
+  // The master key that encrypts processor secrets is not configured, so no
+  // account can be connected.
+  CREDENTIALS_KEY_NOT_CONFIGURED: {
+    status: 503,
+    message:
+      'Processor accounts cannot be connected until the credentials master key is configured.',
   },
   PAYLOAD_TOO_LARGE: {
     status: 413,

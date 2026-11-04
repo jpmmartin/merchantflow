@@ -68,6 +68,56 @@ export default defineConfig(
     },
   },
   {
+    // The processor port is provider-agnostic: no framework, database,
+    // validation library, or provider SDK, and of the workspace only the
+    // domain package (AD-73).
+    files: ['packages/processor-contracts/**/*.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: [
+                '@nestjs/*',
+                'kysely',
+                'kysely/*',
+                'pg',
+                'pg/*',
+                'zod',
+                'zod/*',
+                '@merchantflow/*',
+                '!@merchantflow/domain',
+                'stripe',
+                '@stripe/*',
+              ],
+              message:
+                'packages/processor-contracts must stay free of frameworks, database drivers, validation libraries, and provider SDKs.',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    // Stripe models stay inside the Stripe adapter package (AD-73).
+    files: ['apps/**/*.{ts,tsx}', 'packages/database/**/*.ts', 'tests/**/*.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['stripe', 'stripe/*'],
+              message:
+                'Only packages/processor-stripe may import the Stripe SDK; use the processor port.',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
     // Amounts are `bigint` from the API string to the database column and never
     // pass through `number`, which rounds above 2^53 - 1 (AD-60). The money code
     // cannot use `Number`, the globals that return or coerce to a number,

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { isMasterKeyEncoding } from './master-key.js';
 
 const TCP_PORT_MAX = 65535;
 
@@ -41,6 +42,15 @@ export const envSchema = z.object({
   // Email of the platform administrator user created by `pnpm db:seed`.
   // Without it the seed uses its documented default.
   SEED_ADMIN_EMAIL: z.email().optional(),
+  // Master key that encrypts the secret keys of processor accounts: 32 random
+  // bytes in standard base64 (44 characters). It is a secret, so it has no
+  // default. Outside production it may be unset, and connecting an account
+  // then answers 503; production refuses to start without it. An empty value
+  // counts as unset, because Compose passes an unset variable as empty.
+  CREDENTIALS_MASTER_KEY: z.preprocess(
+    (value) => (value === '' ? undefined : value),
+    z.string().refine(isMasterKeyEncoding).optional(),
+  ),
 });
 
 export type Env = z.infer<typeof envSchema>;

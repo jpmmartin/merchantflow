@@ -7,6 +7,16 @@ import { configureApp } from '../../src/app.setup.js';
 import { ApiHttpAdapter } from '../../src/modules/errors/api/api-http-adapter.js';
 import type { Clock } from '../../src/modules/clock/clock.js';
 
+/**
+ * Fixed master key of the processor account secrets in API tests: 32 bytes in
+ * base64. It encrypts only test fixtures, so it is not a secret, and it lets
+ * the application start in production mode too, which requires a key.
+ */
+export const TEST_CREDENTIALS_MASTER_KEY = Buffer.from(
+  'merchantflow-test-master-key-32b',
+  'utf8',
+).toString('base64');
+
 export interface LogLine {
   level: number;
   msg?: string;
@@ -32,6 +42,7 @@ export async function startApp(
 ) {
   vi.stubEnv('DATABASE_URL', databaseUrl);
   vi.stubEnv('LOG_LEVEL', 'info');
+  vi.stubEnv('CREDENTIALS_MASTER_KEY', TEST_CREDENTIALS_MASTER_KEY);
   const [{ AppModule }, { LOG_DESTINATION }, { CLOCK }] = await Promise.all([
     import('../../src/app.module.js'),
     import('../../src/modules/logging/logging.module.js'),

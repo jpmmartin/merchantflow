@@ -8,7 +8,15 @@ export type MerchantFailureCode =
   | 'TRANSITION_NOT_ALLOWED'
   | 'STATUS_CONFLICT'
   | 'EMAIL_TAKEN'
-  | 'SELF_DISABLE';
+  | 'SELF_DISABLE'
+  | 'CREDENTIALS_KEY_NOT_CONFIGURED'
+  | 'PROVIDER_UNSUPPORTED'
+  | 'LIVE_CREDENTIALS'
+  | 'INVALID_CREDENTIALS'
+  | 'PROCESSOR_UNAVAILABLE'
+  | 'ALREADY_CONNECTED'
+  | 'DISABLED'
+  | 'LOCK_TIMEOUT';
 
 /**
  * The exception for a refused request. Both "not found" outcomes become the
@@ -30,5 +38,21 @@ export function toApiException(code: MerchantFailureCode): ApiException {
       return new ApiException('USER_EMAIL_TAKEN');
     case 'SELF_DISABLE':
       return new ApiException('USER_SELF_DISABLE_NOT_ALLOWED');
+    case 'CREDENTIALS_KEY_NOT_CONFIGURED':
+      return new ApiException('CREDENTIALS_KEY_NOT_CONFIGURED');
+    case 'PROVIDER_UNSUPPORTED':
+      return new ApiException('PROCESSOR_PROVIDER_UNSUPPORTED');
+    case 'LIVE_CREDENTIALS':
+      return new ApiException('PROCESSOR_LIVE_CREDENTIALS_REJECTED');
+    case 'INVALID_CREDENTIALS':
+      return new ApiException('PROCESSOR_CREDENTIALS_INVALID');
+    case 'PROCESSOR_UNAVAILABLE':
+      return new ApiException('PROCESSOR_UNAVAILABLE');
+    case 'ALREADY_CONNECTED':
+      return new ApiException('PROCESSOR_ACCOUNT_ALREADY_CONNECTED');
+    case 'DISABLED':
+      return new ApiException('PROCESSOR_ACCOUNT_DISABLED');
+    case 'LOCK_TIMEOUT':
+      return new ApiException('OPERATION_TIMEOUT');
   }
 }

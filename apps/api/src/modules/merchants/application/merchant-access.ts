@@ -20,8 +20,9 @@ export function canAddressMerchant(
 }
 
 /**
- * Whether the caller may manage who can act for a merchant it can address:
- * create and disable its users, and issue and revoke its API keys. The
+ * Whether the caller may manage who and what can act for a merchant it can
+ * address: create and disable its users, issue and revoke its API keys, and
+ * connect, disable, and choose the default of its processor accounts. The
  * platform administrator may, and so may `MERCHANT_ADMIN` for its own
  * merchant; `MERCHANT_READ_ONLY` may not. Call it only after
  * `canAddressMerchant`, so another merchant is "not found" before any role

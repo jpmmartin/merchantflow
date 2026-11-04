@@ -37,6 +37,14 @@ services:
       # on the Compose network. A POSTGRES_PASSWORD with reserved URL characters
       # must be percent-encoded here.
       DATABASE_URL: postgresql://merchantflow:${POSTGRES_PASSWORD:-merchantflow_dev}@postgres:5432/merchantflow
+      # Values come from the shell or the repository-root .env, which Compose
+      # reads for interpolation; unset ones arrive empty and count as unset.
+      # Recreate the container (docker compose up -d) after changing them.
+      # Master key of the processor account secrets (see .env.example).
+      CREDENTIALS_MASTER_KEY: ${CREDENTIALS_MASTER_KEY:-}
+      # Stripe test keys for manual checks only; the API never reads them.
+      STRIPE_TEST_SECRET_KEY: ${STRIPE_TEST_SECRET_KEY:-}
+      STRIPE_TEST_PUBLISHABLE_KEY: ${STRIPE_TEST_PUBLISHABLE_KEY:-}
     volumes:
       - .:/workspace
       - node-modules:/workspace/node_modules

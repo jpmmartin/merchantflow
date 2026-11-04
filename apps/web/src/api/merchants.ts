@@ -172,3 +172,71 @@ export async function revokeApiKey(
     `${merchantPath(merchantId)}/api-keys/${encodeURIComponent(apiKeyId)}/revoke`,
   );
 }
+
+/**
+ * A processor account as the API lists it: the secret key appears only as its
+ * last four characters.
+ */
+export interface ProcessorAccount {
+  readonly id: string;
+  readonly merchant_id: string;
+  readonly provider: string;
+  readonly display_name: string;
+  readonly provider_account_id: string;
+  readonly publishable_key: string;
+  readonly secret_key_hint: string;
+  readonly enabled: boolean;
+  readonly is_default: boolean;
+  readonly created_at: string;
+  readonly updated_at: string;
+}
+
+export interface NewProcessorAccount {
+  readonly provider: string;
+  readonly display_name: string;
+  readonly credentials: {
+    readonly secret_key: string;
+    readonly publishable_key: string;
+  };
+}
+
+export async function listProcessorAccounts(
+  merchantId: string,
+): Promise<readonly ProcessorAccount[]> {
+  const page = (await apiRequest(
+    'GET',
+    `${merchantPath(merchantId)}/processor-accounts`,
+  )) as { readonly data: readonly ProcessorAccount[] };
+  return page.data;
+}
+
+export async function connectProcessorAccount(
+  merchantId: string,
+  account: NewProcessorAccount,
+): Promise<ProcessorAccount> {
+  return (await apiRequest(
+    'POST',
+    `${merchantPath(merchantId)}/processor-accounts`,
+    { body: account },
+  )) as ProcessorAccount;
+}
+
+export async function disableProcessorAccount(
+  merchantId: string,
+  processorAccountId: string,
+): Promise<ProcessorAccount> {
+  return (await apiRequest(
+    'POST',
+    `${merchantPath(merchantId)}/processor-accounts/${encodeURIComponent(processorAccountId)}/disable`,
+  )) as ProcessorAccount;
+}
+
+export async function setDefaultProcessorAccount(
+  merchantId: string,
+  processorAccountId: string,
+): Promise<ProcessorAccount> {
+  return (await apiRequest(
+    'POST',
+    `${merchantPath(merchantId)}/processor-accounts/${encodeURIComponent(processorAccountId)}/default`,
+  )) as ProcessorAccount;
+}

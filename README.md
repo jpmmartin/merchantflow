@@ -8,24 +8,24 @@ MerchantFlow is a payment orchestration reference platform built as a modular mo
 
 Today the repository contains the runnable foundation only:
 
-- a pnpm workspace with a NestJS API (`apps/api`), a PostgreSQL access package (`packages/database`), and a web frontend (`apps/web`, React, Vite, and Bootstrap 5) with sign-in, merchant management, and the users and API keys of each merchant (see Web frontend);
+- a pnpm workspace with a NestJS API (`apps/api`), a PostgreSQL access package (`packages/database`), a provider-agnostic processor port (`packages/processor-contracts`), a Stripe adapter (`packages/processor-stripe`), and a web frontend (`apps/web`, React, Vite, and Bootstrap 5) with sign-in, merchant management, and the users, API keys, and Stripe accounts of each merchant (see Web frontend);
 - liveness and readiness endpoints, `GET /health/live` and `GET /health/ready`;
 - validated environment configuration that stops the API at startup when it is invalid;
 - structured JSON logs with a correlation ID on every request;
 - one error format for every failure, with a stable `code`, a safe message, and the correlation ID, plus request validation with Zod and an OpenAPI document served outside production (see API conventions);
 - a forward-only SQL migration runner (`pnpm db:migrate`);
-- database tables for merchants, API keys, users, user sessions, an append-only audit trail, idempotency records, and payment intents, with the constraints enforced by PostgreSQL itself;
+- database tables for merchants, API keys, users, user sessions, processor accounts, an append-only audit trail, idempotency records, and payment intents, with the constraints enforced by PostgreSQL itself;
 - API keys: 256 bits of randomness, only a lookup identifier and a SHA-256 hash stored, and an audit event for each issuance and revocation;
 - request authentication: a global guard checks the `Authorization: Bearer <token>` header, an API key or a user session token, against the stored hash on every request, with deny-by-default routing and role checks (see Authentication);
 - user sign-in: `POST /api/v1/auth/login` with an email and a password (scrypt hashes only), `POST /api/v1/auth/logout`, and `GET /api/v1/auth/me`;
-- merchant endpoints under `/api/v1/merchants`: create, read, list with stable pagination, update, change status, list, issue, and revoke API keys, and create, list, and disable merchant users, each with role rules, tenant isolation, and an audit event for each change (see Merchant endpoints);
+- merchant endpoints under `/api/v1/merchants`: create, read, list with stable pagination, update, change status, list, issue, and revoke API keys, create, list, and disable merchant users, and connect, list, disable, and choose the default of Stripe test accounts, each with role rules, tenant isolation, and an audit event for each change (see Merchant endpoints);
 - payment intent creation, `POST /api/v1/payment-intents`, with a required `Idempotency-Key` and protection against a second intent for the same merchant order (see Payment intents); nothing is charged;
 - payment intent retrieval, `GET /api/v1/payment-intents/{id}`, scoped to the merchant of the key (see Payment intents);
 - a development seed, `pnpm db:seed`, that creates the first platform administrator key and the platform administrator user (see Demonstration: two merchants, neither sees the other, and Web frontend);
 - linting, formatting, type checking, unit tests, and integration tests against a real PostgreSQL started with Testcontainers, including an HTTP concurrency suite (`tests/concurrency`) that sends 50 simultaneous requests to the listening API and checks that duplicates create one intent;
 - a GitHub Actions workflow that runs the same checks.
 
-Merchant users and every frontend screen other than sign-in and the signed-in home page, listing payment intents, confirming (charging) one, processors, the ledger, and every other business capability are planned and do not exist yet.
+Listing payment intents, confirming (charging) one, any call to Stripe other than validating an account's keys, the simulated processor, the ledger, and every other business capability are planned and do not exist yet.
 
 ## Prerequisites
 
@@ -164,6 +164,10 @@ All of them need an API key or a session token (see Authentication) and use `sna
 | `POST /api/v1/merchants/{id}/users`                     | creates a user   | creates a user of its own   | 403                  |
 | `GET /api/v1/merchants/{id}/users`                      | lists the users  | of its own merchant         | of its own merchant  |
 | `POST /api/v1/merchants/{id}/users/{userId}/disable`    | disables a user  | disables a user of its own  | 403                  |
+| `POST /api/v1/merchants/{id}/processor-accounts`        | connects an account | connects one of its own  | 403                  |
+| `GET /api/v1/merchants/{id}/processor-accounts`         | lists the accounts | of its own merchant       | of its own merchant  |
+| `POST /api/v1/merchants/{id}/processor-accounts/{processorAccountId}/disable` | disables an account | of its own | 403      |
+| `POST /api/v1/merchants/{id}/processor-accounts/{processorAccountId}/default` | sets the default | of its own   | 403                  |
 
 - A merchant key that names any merchant other than its own gets `404 NOT_FOUND` before any role check, and the answer is the same as for a merchant that does not exist. For its own merchant, a forbidden operation, field, or status change is `403 INSUFFICIENT_ROLE` and nothing changes, also when the merchant is suspended. A merchant administrator may still edit `display_name` and `industry` while its merchant is suspended.
 - A platform administrator updates `legal_name`, `display_name`, `business_type`, `industry`, and `country_code`. `default_currency` is fixed when the merchant is created, and the status changes only through `POST .../status`.
@@ -175,10 +179,27 @@ All of them need an API key or a session token (see Authentication) and use `sna
 - `GET .../users` returns `{"data": [...]}` with every user of the merchant, disabled ones included, oldest first, and never a password or its hash.
 - `POST .../users/{userId}/disable` disables the user and revokes all its sessions in the same transaction, so its token gets `401` at the next request and it can no longer sign in. A signed-in user cannot disable itself (`409 USER_SELF_DISABLE_NOT_ALLOWED`). Disabling a disabled user succeeds and changes nothing. There is no re-enable yet.
 - `GET /api/v1/merchants?limit=20&cursor=...` returns `{"data": [...], "next_cursor": "..."}` ordered by creation time and then id. `limit` is 1 to 100 (default 20). Pass `next_cursor` back unchanged as `cursor`; it is `null` on the last page. An invalid cursor is a `400`. A walk over the pages never repeats a merchant, and never skips one that existed when it began.
-- Every change writes one audit event in the same transaction, naming the API key or user that made it and the request's correlation ID (`USER_CREATED` and `USER_DISABLED` for users, with no password). Updates record the previous and new values of the changed fields.
+- Every change writes one audit event in the same transaction, naming the API key or user that made it and the request's correlation ID (`USER_CREATED` and `USER_DISABLED` for users, with no password; `PROCESSOR_ACCOUNT_CONNECTED`, `PROCESSOR_ACCOUNT_DISABLED`, and `PROCESSOR_ACCOUNT_DEFAULT_CHANGED` for processor accounts, with no key). Updates record the previous and new values of the changed fields.
 - The OpenAPI document (outside production) lists each endpoint with its roles, schemas, error responses, and the `bearer` security scheme.
 
 The first platform administrator key cannot be created through the API; `pnpm db:seed` creates it (see Demonstration).
+
+## Processor accounts
+
+A merchant collects payments through a processor account. For now the only provider is Stripe, in **test mode only**; no payment is sent to Stripe yet (planned).
+
+- `POST .../processor-accounts` with `{"provider": "stripe", "display_name": "...", "credentials": {"secret_key": "sk_test_...", "publishable_key": "pk_test_..."}}` validates the keys and stores the account (`201`, `Cache-Control: no-store`):
+  - a live key (`sk_live_`, `rk_live_`, `pk_live_`) is `422 PROCESSOR_LIVE_CREDENTIALS_REJECTED` before any call to Stripe; a key of another format is `422 PROCESSOR_CREDENTIALS_INVALID`;
+  - the API then makes two reads with the secret key, `GET /v1/account` (which gives the `acct_` ID) and `GET /v1/balance` (whose `livemode` must be `false`). A key Stripe refuses is `422 PROCESSOR_CREDENTIALS_INVALID`; Stripe unreachable is `503 PROCESSOR_UNAVAILABLE`. No answer repeats a key or a Stripe message;
+  - the publishable key is checked for format and mode only: Stripe offers no read that tells which account it belongs to, so use the publishable key of the same Stripe account;
+  - the same Stripe account connected twice to a merchant while enabled is `409 PROCESSOR_ACCOUNT_ALREADY_CONNECTED`;
+  - without `CREDENTIALS_MASTER_KEY` (see Configuration) the answer is `503 CREDENTIALS_KEY_NOT_CONFIGURED`.
+- The secret key is stored encrypted with AES-256-GCM under the master key and is never returned. Responses carry `id`, `merchant_id`, `provider`, `display_name`, `provider_account_id`, `publishable_key`, `secret_key_hint` (its last four characters), `enabled`, `is_default`, `created_at`, and `updated_at`.
+- The first account of a merchant, or any account connected while it has no default, becomes the default. `POST .../{processorAccountId}/default` makes another enabled account the default; a disabled one is `409 PROCESSOR_ACCOUNT_DISABLED`.
+- `POST .../{processorAccountId}/disable` disables an account. Disabling the default leaves the merchant with **no default** until one is chosen; no other account is picked for it. There is no re-enable; connect the account again instead.
+- `GET .../processor-accounts` returns `{"data": [...]}` with every account, disabled ones included, oldest first.
+
+To try it, use the test keys of your own Stripe sandbox (Dashboard, Developers, API keys, with test mode on).
 
 ## Payment intents
 
@@ -340,7 +361,7 @@ Alternatively, `docker compose down --volumes` followed by the Quick start gives
 
 - sign-in and sign-out, and an Account page with the signed-in user and role from `GET /auth/me`;
 - for the platform administrator: the merchants list (`/merchants`, with **Load more** for the next page), the create form (`/merchants/new`), the activate, suspend, and reactivate buttons the current status allows, and each merchant's page (`/merchants/{id}`);
-- on a merchant's page: its users (create, list, disable with a confirmation) and its API keys (issue with a merchant role, list, revoke with a confirmation). A new user's password and a new key are shown once, with a copy button, and are forgotten when their dialog closes;
+- on a merchant's page: its users (create, list, disable with a confirmation), its API keys (issue with a merchant role, list, revoke with a confirmation), and its processor accounts (connect a Stripe test account with both keys, list with the secret key's last four characters, make one the default, disable with a confirmation). A new user's password and a new key are shown once, with a copy button, and are forgotten when their dialog closes; the Stripe secret key field is a password field, cleared as soon as the form is submitted;
 - for a merchant user: only its own merchant's page, where it lands after sign-in, with no merchant list and no status buttons. Any other merchant's page shows the API's `404`.
 
 1. With the stack running and the dependencies installed (Quick start steps 1 and 2), apply the migrations and run the seed. The seed prints the administrator's email and a generated password **once**; store the password.
@@ -418,8 +439,18 @@ The API reads its configuration from environment variables and refuses to start,
 | `CORS_ALLOWED_ORIGINS` | `http://localhost:5173,http://127.0.0.1:5173` outside production; none in production | Comma-separated browser origins (`scheme://host[:port]`, no path, no wildcard) allowed to call the API |
 | `SEED_ADMIN_EMAIL` | `admin@merchantflow.test` | Email of the platform administrator user created by `pnpm db:seed` |
 | `VITE_API_BASE_URL` | `http://localhost:3000/api/v1` | API base URL the web frontend calls; read by Vite, not by the API |
+| `CREDENTIALS_MASTER_KEY` | none | 32 random bytes in standard base64 that encrypt processor secret keys; a secret. Unset: development and test start, and connecting an account answers `503`; production does not start. An invalid value stops startup |
+| `STRIPE_TEST_SECRET_KEY`, `STRIPE_TEST_PUBLISHABLE_KEY` | none | Your Stripe test keys, for manual checks only; the API never reads them |
 
-[`.env.example`](.env.example) is the reference for every variable. Docker Compose already sets `HOST` and `DATABASE_URL` for the `dev` container, so the quick start needs no `.env` file. To override a value, copy `.env.example` to `.env` in the repository root; `.env` is ignored by Git and must never be committed. The local database password defaults to a throwaway development value and can be changed with the `POSTGRES_PASSWORD` environment variable when running `docker compose`.
+[`.env.example`](.env.example) is the reference for every variable. Docker Compose already sets `HOST` and `DATABASE_URL` for the `dev` container, so the quick start needs no `.env` file.
+
+Compose also passes `CREDENTIALS_MASTER_KEY`, `STRIPE_TEST_SECRET_KEY`, and `STRIPE_TEST_PUBLISHABLE_KEY` into the `dev` container from your shell or from the repository-root `.env`, which Compose reads for interpolation. After setting or changing them, recreate the container with `docker compose up -d` (this stops anything running inside it, such as `pnpm dev`), and start the API again. To create a master key:
+
+```bash
+docker compose exec -T dev node -e "console.log(require('node:crypto').randomBytes(32).toString('base64'))"
+```
+
+Keep it: losing it makes every stored secret key unreadable, and the accounts must be connected again. To override a value, copy `.env.example` to `.env` in the repository root; `.env` is ignored by Git and must never be committed. The local database password defaults to a throwaway development value and can be changed with the `POSTGRES_PASSWORD` environment variable when running `docker compose`.
 
 ## Current limitations
 
@@ -427,12 +458,13 @@ The API reads its configuration from environment variables and refuses to start,
 - No rate limit or input size limit beyond the parser's default exists yet, sign-in included. There is no password reset, email verification, or multi-factor authentication.
 - Every merchant user is `MERCHANT_ADMIN`; there is no role choice, re-enabling, password change, or deletion of users yet, and the lists of a merchant's users and keys are not paginated. Platform users are created only by the seed. Only payment intent creation takes an idempotency key: creating a merchant twice creates two merchants.
 - There is no endpoint to list payment intents yet, nor to confirm one; idempotency records are kept and never deleted (no purge exists). `payment_intents` rejects deletes and changes of an intent's amount, currency, reference, or merchant through triggers that a database superuser or the table owner can still disable.
-- The other business endpoints are the merchant endpoints: no platform key can be issued through the API; the development seed is the only way to create one, and a lost platform key is replaced by revoking it in the database (see Recover a lost platform key). Payment confirmation, processors, ledger, and dashboard are planned.
+- The other business endpoints are the merchant endpoints: no platform key can be issued through the API; the development seed is the only way to create one, and a lost platform key is replaced by revoking it in the database (see Recover a lost platform key). Payment confirmation, payments through Stripe, the simulated processor, ledger, and dashboard are planned.
 - The error responses of the health endpoints and of the unknown-route handler are not described in the OpenAPI document.
 - A merchant created or changed by a transaction that commits late can be missed by a list walk already past its position; the next walk shows it.
 - `api_keys` accepts only the `PLATFORM_ADMIN`, `MERCHANT_ADMIN`, and `MERCHANT_READ_ONLY` roles; rows can be revoked once and never removed or reactivated, through triggers that a database superuser or the table owner can still disable.
 - `audit_events` rejects updates, deletes, and truncation through a trigger, which a database superuser or the table owner can still disable. Audit metadata must never hold secrets or payment credentials.
 - The API's database pool has 10 connections. A request that waits more than 2 seconds for one, on any endpoint, receives `503 SERVICE_BUSY` with `Retry-After` and changed nothing; `GET /health/ready` answers `503` while the pool stays full.
+- Processor accounts: the publishable key is not checked against the secret key's account; the master key cannot be rotated yet (the stored key version allows it later); the list is not paginated; a disabled account cannot be re-enabled.
 - The setup is verified on Docker Desktop only (see Prerequisites).
 - The GitHub Actions workflow has not run on a hosted runner yet.
 - There is no production build, deployment configuration, or container image for running the API outside development.

@@ -3,6 +3,7 @@ import {
   MERCHANT_STATUSES,
   isSupportedCurrency,
 } from '@merchantflow/domain';
+import { PROVIDER_CODE_PATTERN } from '@merchantflow/processor-contracts';
 import { z } from 'zod';
 import { MERCHANT_API_KEY_ROLES } from '../../auth/application/api-key-scope.js';
 import {
@@ -275,4 +276,78 @@ export const merchantUserListResponseSchema = z.object({
 
 export type MerchantUserListResponse = z.infer<
   typeof merchantUserListResponseSchema
+>;
+
+export const processorAccountIdParamSchema = z.uuid();
+
+/** Longest key accepted; provider keys are far shorter. */
+const PROCESSOR_KEY_MAX_LENGTH = 255;
+
+const processorKey = z.string().min(1).max(PROCESSOR_KEY_MAX_LENGTH);
+
+/**
+ * A processor account to connect. The provider code is checked by format
+ * only; whether an adapter exists for it is the use case's answer. The keys
+ * are checked only for length here: their format and mode are the adapter's
+ * to judge. A validation issue names the field and the issue code, never the
+ * value (AD-46), so a key never comes back in an error.
+ */
+export const connectProcessorAccountSchema = z.strictObject({
+  provider: z
+    .string()
+    .regex(PROVIDER_CODE_PATTERN)
+    .describe('Provider code. Supported: stripe.'),
+  display_name: displayName.describe('Name shown for the account.'),
+  credentials: z
+    .strictObject({
+      secret_key: processorKey.describe(
+        'Secret key of the account; for Stripe, a test key (sk_test_). It is stored only encrypted and is never returned.',
+      ),
+      publishable_key: processorKey.describe(
+        'Publishable key of the same account; for Stripe, a test key (pk_test_). Not a secret: the card form uses it.',
+      ),
+    })
+    .describe('Credentials of the account. Live-mode keys are refused.'),
+});
+
+export type ConnectProcessorAccountBody = z.infer<
+  typeof connectProcessorAccountSchema
+>;
+
+export const processorAccountResponseSchema = z.object({
+  id: z.uuid().describe('Identifier of the processor account.'),
+  merchant_id: z.uuid(),
+  provider: z.string(),
+  display_name: z.string(),
+  provider_account_id: z
+    .string()
+    .describe('Identifier of the account at the provider, such as acct_...'),
+  publishable_key: z.string(),
+  secret_key_hint: z
+    .string()
+    .describe(
+      'Last four characters of the secret key, which is never returned.',
+    ),
+  enabled: z.boolean(),
+  is_default: z
+    .boolean()
+    .describe('The account payments use; at most one per merchant.'),
+  created_at: timestamp,
+  updated_at: timestamp,
+});
+
+export type ProcessorAccountResponse = z.infer<
+  typeof processorAccountResponseSchema
+>;
+
+export const processorAccountListResponseSchema = z.object({
+  data: z
+    .array(processorAccountResponseSchema)
+    .describe(
+      'Every processor account of the merchant, disabled ones included, oldest first.',
+    ),
+});
+
+export type ProcessorAccountListResponse = z.infer<
+  typeof processorAccountListResponseSchema
 >;

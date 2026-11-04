@@ -72,6 +72,7 @@ function labelOf(entry: TenantRoute): string {
     apiKeyId: 'y',
     paymentIntentId: 'z',
     userId: 'w',
+    processorAccountId: 'v',
   }).body;
   return body === undefined
     ? entry.route
@@ -483,6 +484,9 @@ describe('tenant isolation', () => {
               ...tenants.a.resources,
               apiKeyId: tenants.platform.id,
               userId: tenants.platformUserId,
+              // A processor account always belongs to a merchant, so the
+              // closest case is the account of the other merchant.
+              processorAccountId: tenants.b.resources.processorAccountId,
             }),
           );
 

@@ -14,7 +14,18 @@ export interface TenantResources {
   readonly paymentIntentId: string;
   /** Identifier of a user that belongs to the merchant. */
   readonly userId: string;
+  /** Identifier of a processor account that belongs to the merchant. */
+  readonly processorAccountId: string;
 }
+
+/**
+ * A live-mode Stripe secret key that exists nowhere. The adapter refuses it
+ * from its prefix, so the connect route never calls Stripe in the suite. It is
+ * built from parts so that secret scanners do not take the fixture for a key.
+ */
+const FAKE_LIVE_SECRET_KEY = ['sk', 'live', 'tenant0isolation0fixture'].join(
+  '_',
+);
 
 /** A request a route entry builds for a set of resources. */
 export interface BuiltRequest {
@@ -202,6 +213,52 @@ export const TENANT_ROUTES: readonly TenantRoute[] = [
     route: 'POST /merchants/:id/users/:userId/disable',
     request: (r) => ({
       path: `/merchants/${r.merchantId}/users/${r.userId}/disable`,
+    }),
+    nested: true,
+    platformExisting: 200,
+    platformMissing: 404,
+  },
+  {
+    // A live key is refused before any call to Stripe, after the merchant is
+    // found, so a platform key gets 422 for an existing merchant.
+    kind: 'resource',
+    route: 'POST /merchants/:id/processor-accounts',
+    request: (r) => ({
+      path: `/merchants/${r.merchantId}/processor-accounts`,
+      body: {
+        provider: 'stripe',
+        display_name: 'Tenant Stripe',
+        credentials: {
+          secret_key: FAKE_LIVE_SECRET_KEY,
+          publishable_key: 'pk_test_tenantisolationfixture',
+        },
+      },
+    }),
+    platformExisting: 422,
+    platformMissing: 404,
+  },
+  {
+    kind: 'resource',
+    route: 'GET /merchants/:id/processor-accounts',
+    request: (r) => ({ path: `/merchants/${r.merchantId}/processor-accounts` }),
+    platformExisting: 200,
+    platformMissing: 404,
+  },
+  {
+    kind: 'resource',
+    route: 'POST /merchants/:id/processor-accounts/:processorAccountId/disable',
+    request: (r) => ({
+      path: `/merchants/${r.merchantId}/processor-accounts/${r.processorAccountId}/disable`,
+    }),
+    nested: true,
+    platformExisting: 200,
+    platformMissing: 404,
+  },
+  {
+    kind: 'resource',
+    route: 'POST /merchants/:id/processor-accounts/:processorAccountId/default',
+    request: (r) => ({
+      path: `/merchants/${r.merchantId}/processor-accounts/${r.processorAccountId}/default`,
     }),
     nested: true,
     platformExisting: 200,

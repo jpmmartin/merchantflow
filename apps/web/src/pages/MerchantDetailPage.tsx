@@ -12,6 +12,7 @@ import { ErrorAlert } from '../components/ErrorAlert';
 import { formatTime } from '../components/format';
 import { StatusBadge } from '../components/StatusBadge';
 import { MerchantApiKeysSection } from './MerchantApiKeysSection';
+import { MerchantProcessorAccountsSection } from './MerchantProcessorAccountsSection';
 import { MerchantUsersSection } from './MerchantUsersSection';
 
 interface MerchantDetailPageProps {
@@ -114,6 +115,10 @@ export function MerchantDetailPage({ principal }: MerchantDetailPageProps) {
       </div>
       <MerchantUsersSection merchantId={merchant.id} principal={principal} />
       <MerchantApiKeysSection merchantId={merchant.id} principal={principal} />
+      <MerchantProcessorAccountsSection
+        merchantId={merchant.id}
+        principal={principal}
+      />
     </>
   );
 }

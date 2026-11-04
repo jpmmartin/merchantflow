@@ -4,6 +4,7 @@ import type { RevokedMerchantApiKey } from '../application/revoke-merchant-api-k
 import type { ApiKey } from '../../auth/application/api-key.js';
 import type { ApiKeySummary } from '../../auth/application/find-api-key.service.js';
 import type { UserSummary } from '../../auth/application/user.js';
+import type { ProcessorAccount } from '../application/processor-account.js';
 import { encodeMerchantCursor } from './merchant-cursor.js';
 import type {
   ApiKeyListResponse,
@@ -14,6 +15,8 @@ import type {
   MerchantUserResponse,
   MerchantListResponse,
   MerchantResponse,
+  ProcessorAccountListResponse,
+  ProcessorAccountResponse,
   RevokedApiKeyResponse,
 } from './merchant.schemas.js';
 
@@ -130,4 +133,32 @@ export function toMerchantUserListResponse(
   users: readonly UserSummary[],
 ): MerchantUserListResponse {
   return { data: users.map(toMerchantUserResponse) };
+}
+
+/**
+ * A processor account, built field by field: the secret key appears only as
+ * its last four characters, and the encrypted secret is never read.
+ */
+export function toProcessorAccountResponse(
+  account: ProcessorAccount,
+): ProcessorAccountResponse {
+  return {
+    id: account.id,
+    merchant_id: account.merchantId,
+    provider: account.provider,
+    display_name: account.displayName,
+    provider_account_id: account.providerAccountId,
+    publishable_key: account.publishableKey,
+    secret_key_hint: account.secretKeyHint,
+    enabled: account.enabled,
+    is_default: account.isDefault,
+    created_at: account.createdAt.toISOString(),
+    updated_at: account.updatedAt.toISOString(),
+  };
+}
+
+export function toProcessorAccountListResponse(
+  accounts: readonly ProcessorAccount[],
+): ProcessorAccountListResponse {
+  return { data: accounts.map(toProcessorAccountResponse) };
 }

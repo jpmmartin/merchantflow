@@ -3,7 +3,12 @@ import type { DatabaseSchema } from '@merchantflow/database';
 import { CreateUserService } from '../../src/modules/auth/application/create-user.service.js';
 import { generatePassword } from '../../src/modules/auth/application/password-hash.js';
 import {
+  SECRET_CIPHER,
+  type SecretCipher,
+} from '../../src/modules/merchants/infrastructure/secret-cipher.js';
+import {
   API,
+  START_TIME,
   type ApiMerchant,
   type IssuedKey,
   type MerchantApi,
@@ -18,7 +23,7 @@ import type { TenantResources } from './tenant-routes.js';
 
 /**
  * One merchant with a key of each merchant role, a key to be addressed, a
- * payment intent, and a user.
+ * payment intent, a user, and a default processor account.
  */
 export interface Tenant {
   readonly merchant: ApiMerchant;
@@ -44,6 +49,50 @@ export const MISSING_MERCHANT_ID = '4c1f6a52-7d0e-4f0a-9d53-2f2b6a1c9e10';
 const MISSING_KEY_ID = '9b7d2c1e-3a54-4e8f-8f0b-6d1a5c2e7f43';
 const MISSING_PAYMENT_INTENT_ID = '2d8e5b7a-61c3-4f9d-a0e4-7b3c9f1d6a58';
 const MISSING_USER_ID = '6e2a9c4f-8b17-4d3e-b5a0-1f7c3d9e2b64';
+const MISSING_PROCESSOR_ACCOUNT_ID = '8a3f1d6c-2e9b-4c7a-9f05-3b8e6d2a1c47';
+
+/**
+ * Stores a default Stripe processor account for a merchant directly, with its
+ * secret encrypted by the application's cipher, because connecting one through
+ * the API would call Stripe.
+ */
+async function createProcessorAccount(
+  api: MerchantApi,
+  merchantId: string,
+): Promise<string> {
+  const cipher = api.app.get<SecretCipher | null>(SECRET_CIPHER);
+  if (cipher === null) throw new Error('Expected a credentials master key');
+  const id = randomUUID();
+  const compact = randomUUID().replaceAll('-', '');
+  const secretKey = `sk_test_${compact}`;
+  const secret = cipher.encrypt(secretKey, {
+    merchantId,
+    processorAccountId: id,
+    provider: 'stripe',
+  });
+  await api.postgres.client.query(
+    `insert into processor_accounts (
+       id, merchant_id, provider, display_name, provider_account_id,
+       publishable_key, secret_key_ciphertext, secret_key_iv,
+       secret_key_auth_tag, secret_key_version, secret_key_hint, enabled,
+       is_default, created_at, updated_at
+     ) values ($1, $2, 'stripe', 'Tenant Stripe', $3, $4, $5, $6, $7, $8, $9,
+       true, true, $10, $10)`,
+    [
+      id,
+      merchantId,
+      `acct_${compact.slice(0, 16)}`,
+      `pk_test_${compact}`,
+      secret.ciphertext,
+      secret.iv,
+      secret.authTag,
+      secret.keyVersion,
+      secretKey.slice(-4),
+      START_TIME,
+    ],
+  );
+  return id;
+}
 
 async function createTenant(api: MerchantApi): Promise<Tenant> {
   const merchant = await api.createActiveMerchant();
@@ -67,6 +116,7 @@ async function createTenant(api: MerchantApi): Promise<Tenant> {
     throw new Error(`Expected 201, got ${user.status}`);
   }
   const userId = (user.body as { id: string }).id;
+  const processorAccountId = await createProcessorAccount(api, merchant.id);
   return {
     merchant,
     admin,
@@ -77,6 +127,7 @@ async function createTenant(api: MerchantApi): Promise<Tenant> {
       apiKeyId: spare.id,
       paymentIntentId,
       userId,
+      processorAccountId,
     },
   };
 }
@@ -109,6 +160,7 @@ export async function createTenants(api: MerchantApi): Promise<Tenants> {
       apiKeyId: MISSING_KEY_ID,
       paymentIntentId: MISSING_PAYMENT_INTENT_ID,
       userId: MISSING_USER_ID,
+      processorAccountId: MISSING_PROCESSOR_ACCOUNT_ID,
     },
   };
 }
