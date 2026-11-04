@@ -9,13 +9,16 @@ import {
 import { ApiError, onUnauthorized } from './api/client';
 import { ErrorAlert } from './components/ErrorAlert';
 import { Layout } from './components/Layout';
-import { homePathFor } from './components/navigation';
+import { canCreatePayments, homePathFor } from './components/navigation';
 import { AccountPage } from './pages/AccountPage';
 import { CreateMerchantPage } from './pages/CreateMerchantPage';
+import { CreatePaymentPage } from './pages/CreatePaymentPage';
 import { LoginPage } from './pages/LoginPage';
 import { MerchantDetailPage } from './pages/MerchantDetailPage';
 import { MerchantsPage } from './pages/MerchantsPage';
 import { NotFoundPage } from './pages/NotFoundPage';
+import { PaymentDetailPage } from './pages/PaymentDetailPage';
+import { PaymentsPage } from './pages/PaymentsPage';
 import {
   clearSessionToken,
   readSessionToken,
@@ -42,8 +45,9 @@ function initialState(): AppState {
 
 /**
  * The screens of a principal. The platform administrator gets the merchant
- * list, the create form, and any merchant's page; a merchant user gets only
- * its own merchant's page, and every other path leads there.
+ * list, the create form, and any merchant's page; a merchant user gets its own
+ * merchant's page and its payment orders (the create form only for
+ * `MERCHANT_ADMIN`), and every other path leads to its merchant's page.
  */
 function SignedInRoutes({
   principal,
@@ -74,6 +78,20 @@ function SignedInRoutes({
       <Route
         path="/merchants/:merchantId"
         element={<MerchantDetailPage principal={principal} />}
+      />
+      <Route
+        path="/payments"
+        element={<PaymentsPage principal={principal} />}
+      />
+      {canCreatePayments(principal.role) ? (
+        <Route
+          path="/payments/new"
+          element={<CreatePaymentPage principal={principal} />}
+        />
+      ) : null}
+      <Route
+        path="/payments/:paymentIntentId"
+        element={<PaymentDetailPage />}
       />
       <Route path="/account" element={<AccountPage principal={principal} />} />
       <Route path="*" element={<Navigate to={home} replace />} />

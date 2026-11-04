@@ -9,6 +9,7 @@ import {
   type PaymentIntent,
   type PaymentIntentStatus,
 } from '@merchantflow/domain';
+import type { KeysetPosition } from '../../pagination/keyset-cursor.js';
 
 function toRow(intent: PaymentIntent): NewPaymentIntentRow {
   return {
@@ -98,4 +99,46 @@ export async function insertPaymentIntentIfReferenceAbsent(
     .returningAll()
     .executeTakeFirst();
   return row === undefined ? undefined : toPaymentIntent(row);
+}
+
+/**
+ * Returns up to `limit` intents of one merchant, newest first: ordered by
+ * `(created_at, id)` descending, starting after `after` when it is given, and
+ * only those with `status` when it is given. The merchant filter is always
+ * applied, so no row of another tenant is read. The index
+ * `payment_intents_merchant_id_created_at_id_idx`, scanned backwards, serves
+ * the filter, the order, and the continuation without a sort; the status is
+ * checked on the rows the scan reaches. `id` makes the order total, so a walk
+ * over pages neither repeats nor skips an intent that existed when it began.
+ */
+export async function listPaymentIntentsForMerchant(
+  db: Database,
+  page: {
+    readonly merchantId: string;
+    readonly limit: number;
+    readonly after?: KeysetPosition | undefined;
+    readonly status?: PaymentIntentStatus | undefined;
+  },
+): Promise<PaymentIntent[]> {
+  let query = db
+    .selectFrom('payment_intents')
+    .selectAll()
+    .where('merchant_id', '=', page.merchantId);
+  if (page.status !== undefined) {
+    query = query.where('status', '=', page.status);
+  }
+  if (page.after !== undefined) {
+    // A row comparison, so that an intent with the same creation time as the
+    // last one on the previous page is ordered by id instead of being skipped.
+    const { createdAt, id } = page.after;
+    query = query.where((eb) =>
+      eb(eb.refTuple('created_at', 'id'), '<', eb.tuple(createdAt, id)),
+    );
+  }
+  const rows = await query
+    .orderBy('created_at', 'desc')
+    .orderBy('id', 'desc')
+    .limit(page.limit)
+    .execute();
+  return rows.map(toPaymentIntent);
 }

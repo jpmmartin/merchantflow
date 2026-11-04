@@ -295,6 +295,13 @@ export const TENANT_ROUTES: readonly TenantRoute[] = [
     created: 201,
   },
   {
+    // The list names no merchant; each merchant role lists only the intents
+    // of its own merchant, and the platform key is refused.
+    kind: 'collection',
+    route: 'GET /payment-intents',
+    request: () => ({ path: '/payment-intents' }),
+  },
+  {
     // The path names an intent and no merchant, and the platform key is
     // refused for every id, so it gets 403 whether or not the intent exists.
     kind: 'resource',

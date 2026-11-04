@@ -1,11 +1,17 @@
 import react from '@vitejs/plugin-react';
-import { defineConfig } from 'vite';
+import { defaultClientConditions, defineConfig } from 'vite';
 
 /** Port of the development server, published by Compose on the host. */
 const DEV_SERVER_PORT = 5173;
 
 export default defineConfig({
   plugins: [react()],
+  // Workspace packages, such as @merchantflow/domain, are bundled from their
+  // TypeScript source through the `@merchantflow/source` export condition, so
+  // the frontend needs no prior build of them.
+  resolve: {
+    conditions: ['@merchantflow/source', ...defaultClientConditions],
+  },
   // `.env` files are read from the repository root, like the API's. Only
   // variables prefixed with `VITE_` reach the browser bundle.
   envDir: '../..',

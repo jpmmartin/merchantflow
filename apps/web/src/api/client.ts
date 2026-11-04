@@ -1,10 +1,17 @@
 import { API_BASE_URL } from '../config';
 import { clearSessionToken, readSessionToken } from '../session-token';
 
+/** One invalid field of a `VALIDATION_FAILED` answer: where, and which rule. */
+export interface ApiValidationIssue {
+  readonly path: readonly (string | number)[];
+  readonly code: string;
+}
+
 /**
  * A failed API call. `code` is the API's stable error code, or `NETWORK_ERROR`
  * and `INVALID_RESPONSE` for failures before an API answer could be read.
- * `correlationId` is the one the API returned, when there was an answer.
+ * `correlationId` is the one the API returned, when there was an answer, and
+ * `issues` lists the invalid fields of a validation failure.
  */
 export class ApiError extends Error {
   constructor(
@@ -12,6 +19,7 @@ export class ApiError extends Error {
     readonly code: string,
     message: string,
     readonly correlationId: string | undefined,
+    readonly issues: readonly ApiValidationIssue[] = [],
   ) {
     super(message);
     this.name = 'ApiError';
@@ -41,10 +49,40 @@ interface RequestOptions {
   readonly authenticated?: boolean;
 }
 
+/** The issues of an error body, keeping only entries of the documented shape. */
+function readIssues(error: object): readonly ApiValidationIssue[] {
+  if (!('issues' in error) || !Array.isArray(error.issues)) return [];
+  const issues: ApiValidationIssue[] = [];
+  for (const issue of error.issues as readonly unknown[]) {
+    if (
+      typeof issue === 'object' &&
+      issue !== null &&
+      'path' in issue &&
+      Array.isArray(issue.path) &&
+      (issue.path as readonly unknown[]).every(
+        (part) => typeof part === 'string' || typeof part === 'number',
+      ) &&
+      'code' in issue &&
+      typeof issue.code === 'string'
+    ) {
+      issues.push({
+        path: issue.path as readonly (string | number)[],
+        code: issue.code,
+      });
+    }
+  }
+  return issues;
+}
+
 /** The error body every API failure has (`{ error: { code, ... } }`). */
-function readErrorBody(
-  body: unknown,
-): { code: string; message: string; correlationId?: string } | undefined {
+function readErrorBody(body: unknown):
+  | {
+      code: string;
+      message: string;
+      correlationId?: string;
+      issues: readonly ApiValidationIssue[];
+    }
+  | undefined {
   if (typeof body !== 'object' || body === null || !('error' in body)) {
     return undefined;
   }
@@ -65,6 +103,7 @@ function readErrorBody(
     ...('correlationId' in error && typeof error.correlationId === 'string'
       ? { correlationId: error.correlationId }
       : {}),
+    issues: readIssues(error),
   };
 }
 
@@ -135,5 +174,6 @@ export async function apiRequest(
     error?.code ?? 'INVALID_RESPONSE',
     error?.message ?? `The API answered with status ${response.status}.`,
     error?.correlationId ?? headerCorrelationId,
+    error?.issues ?? [],
   );
 }

@@ -8,7 +8,7 @@ MerchantFlow is a payment orchestration reference platform built as a modular mo
 
 Today the repository contains the runnable foundation only:
 
-- a pnpm workspace with a NestJS API (`apps/api`), a PostgreSQL access package (`packages/database`), a provider-agnostic processor port (`packages/processor-contracts`), a Stripe adapter (`packages/processor-stripe`), and a web frontend (`apps/web`, React, Vite, and Bootstrap 5) with sign-in, merchant management, and the users, API keys, and Stripe accounts of each merchant (see Web frontend);
+- a pnpm workspace with a NestJS API (`apps/api`), a PostgreSQL access package (`packages/database`), a provider-agnostic processor port (`packages/processor-contracts`), a Stripe adapter (`packages/processor-stripe`), and a web frontend (`apps/web`, React, Vite, and Bootstrap 5) with sign-in, merchant management, the users, API keys, and Stripe accounts of each merchant, and the payment orders of a merchant user (see Web frontend);
 - liveness and readiness endpoints, `GET /health/live` and `GET /health/ready`;
 - validated environment configuration that stops the API at startup when it is invalid;
 - structured JSON logs with a correlation ID on every request;
@@ -20,12 +20,12 @@ Today the repository contains the runnable foundation only:
 - user sign-in: `POST /api/v1/auth/login` with an email and a password (scrypt hashes only), `POST /api/v1/auth/logout`, and `GET /api/v1/auth/me`;
 - merchant endpoints under `/api/v1/merchants`: create, read, list with stable pagination, update, change status, list, issue, and revoke API keys, create, list, and disable merchant users, and connect, list, disable, and choose the default of Stripe test accounts, each with role rules, tenant isolation, and an audit event for each change (see Merchant endpoints);
 - payment intent creation, `POST /api/v1/payment-intents`, with a required `Idempotency-Key` and protection against a second intent for the same merchant order (see Payment intents); nothing is charged;
-- payment intent retrieval, `GET /api/v1/payment-intents/{id}`, scoped to the merchant of the key (see Payment intents);
+- payment intent retrieval, `GET /api/v1/payment-intents/{id}`, and listing, `GET /api/v1/payment-intents`, newest first with stable pagination and a status filter, both scoped to the merchant of the key (see Payment intents);
 - a development seed, `pnpm db:seed`, that creates the first platform administrator key and the platform administrator user (see Demonstration: two merchants, neither sees the other, and Web frontend);
 - linting, formatting, type checking, unit tests, and integration tests against a real PostgreSQL started with Testcontainers, including an HTTP concurrency suite (`tests/concurrency`) that sends 50 simultaneous requests to the listening API and checks that duplicates create one intent;
 - a GitHub Actions workflow that runs the same checks.
 
-Listing payment intents, confirming (charging) one, any call to Stripe other than validating an account's keys, the simulated processor, the ledger, and every other business capability are planned and do not exist yet.
+Confirming (charging) a payment intent, any call to Stripe other than validating an account's keys, the simulated processor, the ledger, and every other business capability are planned and do not exist yet.
 
 ## Prerequisites
 
@@ -252,6 +252,20 @@ The answer is `200` with the same body as the create response, and `amount_minor
 - A stored intent that this version cannot represent, such as one in a currency the application does not support, is reported as `500 INTERNAL_ERROR` and logged. It is never answered as `404` and never altered.
 - A read writes no audit event and touches no idempotency record.
 
+### Listing payment intents
+
+`GET /api/v1/payment-intents?limit=20&cursor=...&status=...` returns `{"data": [...], "next_cursor": "..."}` with the intents of the merchant of the key, for `MERCHANT_ADMIN` and `MERCHANT_READ_ONLY` keys.
+
+```bash
+curl -sS -w '\nHTTP %{http_code}\n' 'http://127.0.0.1:3000/api/v1/payment-intents?limit=2&status=CREATED' \
+  -H "Authorization: Bearer $KEY_A"
+```
+
+- The intents are ordered newest first, by creation time and then id. Each item has the same body as `GET /api/v1/payment-intents/{id}`.
+- `limit` is 1 to 100 (default 20). Pass `next_cursor` back unchanged as `cursor`, with the same `status`; it is `null` on the last page. An invalid cursor is a `400`. A walk over the pages never repeats an intent, and never skips one that existed when it began.
+- `status` keeps only the intents in that status: `CREATED`, `PROCESSING`, `SUCCEEDED`, `FAILED`, or `UNKNOWN` (the OpenAPI document lists them). Any other value, a lower-case one included, is a `400 VALIDATION_FAILED`.
+- The merchant always comes from the key: a `merchant_id` or any other unknown query parameter is a `400`, and a header naming another merchant is ignored. A `PLATFORM_ADMIN` key or user gets `403 INSUFFICIENT_ROLE`. A `DRAFT` or `SUSPENDED` merchant can still list its intents. A list writes no audit event.
+
 ## Demonstration: two merchants, neither sees the other
 
 This walk-through reproduces the first increment from a running stack: a platform administrator registers two merchants, activates them, and issues each an administrator key; each merchant then reads its own data and gets `404` for the other's. It uses synthetic data only. Docker Compose commands run on the host and `pnpm` commands inside the `dev` container (see Running commands); the `curl` commands run on the host. Replace each `<placeholder>` with the value the previous step printed. No real key appears in this document.
@@ -362,7 +376,11 @@ Alternatively, `docker compose down --volumes` followed by the Quick start gives
 - sign-in and sign-out, and an Account page with the signed-in user and role from `GET /auth/me`;
 - for the platform administrator: the merchants list (`/merchants`, with **Load more** for the next page), the create form (`/merchants/new`), the activate, suspend, and reactivate buttons the current status allows, and each merchant's page (`/merchants/{id}`);
 - on a merchant's page: its users (create, list, disable with a confirmation), its API keys (issue with a merchant role, list, revoke with a confirmation), and its processor accounts (connect a Stripe test account with both keys, list with the secret key's last four characters, make one the default, disable with a confirmation). A new user's password and a new key are shown once, with a copy button, and are forgotten when their dialog closes; the Stripe secret key field is a password field, cleared as soon as the form is submitted;
-- for a merchant user: only its own merchant's page, where it lands after sign-in, with no merchant list and no status buttons. Any other merchant's page shows the API's `404`.
+- for a merchant user: only its own merchant's page, where it lands after sign-in, with no merchant list and no status buttons. Any other merchant's page shows the API's `404`;
+- for a merchant user, a **Payments** section (the platform administrator does not have it, because the payment endpoints refuse platform roles):
+  - the list (`/payments`): reference, amount, currency, status, and creation time, newest first, a status filter kept in the URL (`/payments?status=CREATED`), **Load more** for the next page, and a click on a row to open the order;
+  - the create form (`/payments/new`, `MERCHANT_ADMIN` only): the amount is typed in major units, such as `100.50`, and sent as `amount_minor` (`"10050"`); the currency is the merchant's default currency and cannot be changed; the order reference is the merchant's own identifier. An amount that is empty, negative, malformed, or has more decimals than the currency allows (`100.505` for USD) is refused before anything is sent. Errors show their code, correlation ID, and for `VALIDATION_FAILED` the invalid fields. A successful creation opens the order's page;
+  - the order's page (`/payments/{id}`), with every field, the formatted amount, and the status as a badge. Another merchant's order, or an unknown id, shows the API's `404`.
 
 1. With the stack running and the dependencies installed (Quick start steps 1 and 2), apply the migrations and run the seed. The seed prints the administrator's email and a generated password **once**; store the password.
 
@@ -382,6 +400,8 @@ Alternatively, `docker compose down --volumes` followed by the Quick start gives
 
 Notes:
 
+- The create form generates one `Idempotency-Key` per order. Sending the same values again after any failure, such as a network error or a `503`, reuses it, so an order whose answer was lost is not created twice. Different values, or a successful creation, start a new key. Values are compared as sent, so `100.5` and `100.50` are the same order.
+- Amounts are converted and displayed with text operations only and never pass through a JavaScript `number`.
 - Any API error is shown with its `code` and correlation ID. A `401` on any call after sign-in clears the token and returns to the sign-in screen.
 - The token is kept in the tab's `sessionStorage`: it survives a reload, and closing the tab forgets it.
 - The browser calls the API at `VITE_API_BASE_URL` (default `http://localhost:3000/api/v1`), read by Vite from the repository-root `.env`.
@@ -457,10 +477,11 @@ Keep it: losing it makes every stored secret key unreadable, and the accounts mu
 - A request the JSON body parser rejects (malformed JSON, for instance) receives the standard error but writes no access log line.
 - No rate limit or input size limit beyond the parser's default exists yet, sign-in included. There is no password reset, email verification, or multi-factor authentication.
 - Every merchant user is `MERCHANT_ADMIN`; there is no role choice, re-enabling, password change, or deletion of users yet, and the lists of a merchant's users and keys are not paginated. Platform users are created only by the seed. Only payment intent creation takes an idempotency key: creating a merchant twice creates two merchants.
-- There is no endpoint to list payment intents yet, nor to confirm one; idempotency records are kept and never deleted (no purge exists). `payment_intents` rejects deletes and changes of an intent's amount, currency, reference, or merchant through triggers that a database superuser or the table owner can still disable.
+- There is no endpoint to confirm a payment intent yet; idempotency records are kept and never deleted (no purge exists). `payment_intents` rejects deletes and changes of an intent's amount, currency, reference, or merchant through triggers that a database superuser or the table owner can still disable.
 - The other business endpoints are the merchant endpoints: no platform key can be issued through the API; the development seed is the only way to create one, and a lost platform key is replaced by revoking it in the database (see Recover a lost platform key). Payment confirmation, payments through Stripe, the simulated processor, ledger, and dashboard are planned.
 - The error responses of the health endpoints and of the unknown-route handler are not described in the OpenAPI document.
-- A merchant created or changed by a transaction that commits late can be missed by a list walk already past its position; the next walk shows it.
+- A merchant or payment intent created by a transaction that commits late can be missed by a list walk already past its position; the next walk shows it.
+- The status filter of the payment intent list reads the merchant's intents newest first and keeps those in the status, so a rare status among many intents takes longer to fill a page.
 - `api_keys` accepts only the `PLATFORM_ADMIN`, `MERCHANT_ADMIN`, and `MERCHANT_READ_ONLY` roles; rows can be revoked once and never removed or reactivated, through triggers that a database superuser or the table owner can still disable.
 - `audit_events` rejects updates, deletes, and truncation through a trigger, which a database superuser or the table owner can still disable. Audit metadata must never hold secrets or payment credentials.
 - The API's database pool has 10 connections. A request that waits more than 2 seconds for one, on any endpoint, receives `503 SERVICE_BUSY` with `Retry-After` and changed nothing; `GET /health/ready` answers `503` while the pool stays full.

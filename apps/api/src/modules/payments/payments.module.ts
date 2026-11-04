@@ -6,15 +6,21 @@ import { MerchantsModule } from '../merchants/merchants.module.js';
 import { PaymentIntentsController } from './api/payment-intents.controller.js';
 import { CreatePaymentIntentService } from './application/create-payment-intent.service.js';
 import { GetPaymentIntentService } from './application/get-payment-intent.service.js';
+import { ListPaymentIntentsService } from './application/list-payment-intents.service.js';
 
 /**
  * Owns payment intents and their endpoints. Creation claims idempotency keys
  * through the idempotency module and reads the merchant through the merchants
- * module, both inside its own transaction; retrieval reads only its own table.
+ * module, both inside its own transaction; retrieval and listing read only its
+ * own table.
  */
 @Module({
   imports: [DatabaseModule, ClockModule, IdempotencyModule, MerchantsModule],
   controllers: [PaymentIntentsController],
-  providers: [CreatePaymentIntentService, GetPaymentIntentService],
+  providers: [
+    CreatePaymentIntentService,
+    GetPaymentIntentService,
+    ListPaymentIntentsService,
+  ],
 })
 export class PaymentsModule {}

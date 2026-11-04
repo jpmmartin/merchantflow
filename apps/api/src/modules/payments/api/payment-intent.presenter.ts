@@ -1,6 +1,11 @@
 import { toAmountMinorString, type PaymentIntent } from '@merchantflow/domain';
 import type { IdempotentResponse } from '../../idempotency/application/idempotency-record.js';
-import type { PaymentIntentResponse } from './payment-intent.schemas.js';
+import { encodeKeysetCursor } from '../../pagination/keyset-cursor.js';
+import type { PaymentIntentPage } from '../application/list-payment-intents.service.js';
+import type {
+  PaymentIntentListResponse,
+  PaymentIntentResponse,
+} from './payment-intent.schemas.js';
 
 /** HTTP status of a created intent, stored with its body under the key. */
 export const PAYMENT_INTENT_CREATED_STATUS = 201;
@@ -28,5 +33,15 @@ export function toCreatedPaymentIntentResponse(
   return {
     statusCode: PAYMENT_INTENT_CREATED_STATUS,
     body: { ...toPaymentIntentResponse(intent) },
+  };
+}
+
+/** One page of a merchant's intents, each with the body of a single read. */
+export function toPaymentIntentListResponse(
+  page: PaymentIntentPage,
+): PaymentIntentListResponse {
+  return {
+    data: page.intents.map(toPaymentIntentResponse),
+    next_cursor: page.next === undefined ? null : encodeKeysetCursor(page.next),
   };
 }

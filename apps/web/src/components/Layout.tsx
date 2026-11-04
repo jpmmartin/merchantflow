@@ -28,7 +28,7 @@ export function Layout({
               <li className="nav-item" key={entry.to}>
                 <NavLink
                   to={entry.to}
-                  end={entry.to !== '/merchants'}
+                  end={entry.matchNested !== true}
                   className={({ isActive }) =>
                     `nav-link${isActive ? ' active' : ''}`
                   }

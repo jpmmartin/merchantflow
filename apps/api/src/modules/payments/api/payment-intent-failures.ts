@@ -7,6 +7,7 @@ import { ApiException } from '../../errors/api/api-exception.js';
 import type { ValidationIssue } from '../../errors/api/error-response.js';
 import type { CreatePaymentIntentFailureCode } from '../application/create-payment-intent.service.js';
 import type { GetPaymentIntentResult } from '../application/get-payment-intent.service.js';
+import type { ListPaymentIntentsResult } from '../application/list-payment-intents.service.js';
 import type { CreatePaymentIntentBody } from './payment-intent.schemas.js';
 
 /** The exception for a refused create request. */
@@ -40,6 +41,16 @@ export function toGetApiException(
       return new ApiException('INSUFFICIENT_ROLE');
     case 'NOT_FOUND':
       return new ApiException('NOT_FOUND');
+  }
+}
+
+/** The exception for a refused list request. */
+export function toListApiException(
+  code: Extract<ListPaymentIntentsResult, { ok: false }>['code'],
+): ApiException {
+  switch (code) {
+    case 'FORBIDDEN':
+      return new ApiException('INSUFFICIENT_ROLE');
   }
 }
 

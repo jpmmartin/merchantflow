@@ -10,13 +10,10 @@ import {
   EMAIL_MAX_LENGTH,
   normalizeEmail,
 } from '../../auth/application/user-email.js';
-import { decodeMerchantCursor } from './merchant-cursor.js';
-
-/** Largest page a list request may ask for. */
-export const MAX_PAGE_SIZE = 100;
-
-/** Page size when the request gives none. */
-export const DEFAULT_PAGE_SIZE = 20;
+import {
+  pageCursorQuerySchema,
+  pageLimitQuerySchema,
+} from '../../pagination/keyset-cursor.js';
 
 // The lengths and formats match the columns and check constraints of
 // `merchants` (AD-44), so PostgreSQL never has to be the first to refuse a
@@ -112,31 +109,8 @@ export const issueApiKeySchema = z.strictObject({
 export type IssueApiKeyBody = z.infer<typeof issueApiKeySchema>;
 
 export const listMerchantsQuerySchema = z.strictObject({
-  limit: z.coerce
-    .number()
-    .int()
-    .min(1)
-    .max(MAX_PAGE_SIZE)
-    .default(DEFAULT_PAGE_SIZE)
-    .describe('Page size.'),
-  cursor: z
-    .string()
-    .min(1)
-    .max(200)
-    .transform((value, context) => {
-      const position = decodeMerchantCursor(value);
-      if (position === undefined) {
-        context.issues.push({
-          code: 'custom',
-          input: value,
-          message: 'Invalid cursor.',
-        });
-        return z.NEVER;
-      }
-      return position;
-    })
-    .optional()
-    .describe('The next_cursor of the previous page, unchanged.'),
+  limit: pageLimitQuerySchema,
+  cursor: pageCursorQuerySchema,
 });
 
 export type ListMerchantsQuery = z.infer<typeof listMerchantsQuerySchema>;

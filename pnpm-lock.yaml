@@ -266,6 +266,9 @@ importers:
 
   apps/web:
     dependencies:
+      '@merchantflow/domain':
+        specifier: workspace:*
+        version: link:../../packages/domain
       bootstrap:
         specifier: 5.3.8
         version: 5.3.8(@popperjs/core@2.11.8)

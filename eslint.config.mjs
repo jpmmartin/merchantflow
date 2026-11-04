@@ -123,7 +123,8 @@ export default defineConfig(
     // cannot use `Number`, the globals that return or coerce to a number,
     // `Math`, `JSON` (it reads every numeric literal as a double), or the global
     // object that would reach them, and it cannot use unary plus.
-    files: ['packages/domain/src/money/**/*.ts'],
+    // The frontend's amount conversion follows the same rules (AD-74).
+    files: ['packages/domain/src/money/**/*.ts', 'apps/web/src/money/**/*.ts'],
     rules: {
       'no-restricted-globals': [
         'error',
@@ -137,6 +138,7 @@ export default defineConfig(
           ['JSON', 'JSON.parse reads every numeric literal as a double.'],
           ['globalThis', 'The global object would reach Number and Math.'],
           ['global', 'The global object would reach Number and Math.'],
+          ['window', 'The global object would reach Number and Math.'],
         ].map(([name, reason]) => ({
           name,
           message: `${reason} Amounts stay bigint and never pass through number.`,

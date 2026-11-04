@@ -1,5 +1,5 @@
 import type { ServerResponse } from 'node:http';
-import { Body, Controller, Get, Param, Post, Res } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Query, Res } from '@nestjs/common';
 import {
   ApiBearerAuth,
   ApiHeader,
@@ -19,20 +19,27 @@ import type { IdempotencyJsonObject } from '../../idempotency/application/idempo
 import { CorrelationId } from '../../logging/correlation-id.decorator.js';
 import { CreatePaymentIntentService } from '../application/create-payment-intent.service.js';
 import { GetPaymentIntentService } from '../application/get-payment-intent.service.js';
+import { ListPaymentIntentsService } from '../application/list-payment-intents.service.js';
 import {
   amountOf,
   toApiException,
   toGetApiException,
+  toListApiException,
 } from './payment-intent-failures.js';
 import {
   toCreatedPaymentIntentResponse,
+  toPaymentIntentListResponse,
   toPaymentIntentResponse,
 } from './payment-intent.presenter.js';
 import {
   createPaymentIntentSchema,
+  listPaymentIntentsQuerySchema,
   paymentIntentIdParamSchema,
+  paymentIntentListResponseSchema,
   paymentIntentResponseSchema,
   type CreatePaymentIntentBody,
+  type ListPaymentIntentsQuery,
+  type PaymentIntentListResponse,
   type PaymentIntentResponse,
 } from './payment-intent.schemas.js';
 
@@ -50,6 +57,7 @@ export class PaymentIntentsController {
   constructor(
     private readonly createPaymentIntent: CreatePaymentIntentService,
     private readonly getPaymentIntent: GetPaymentIntentService,
+    private readonly listPaymentIntents: ListPaymentIntentsService,
   ) {}
 
   @Post()
@@ -132,6 +140,59 @@ export class PaymentIntentsController {
     // returned as they are for that request and for every replay.
     response.statusCode = result.response.statusCode;
     return result.response.body;
+  }
+
+  // The request names no merchant, so listing the merchant roles here reveals
+  // nothing (AD-52): each merchant role lists only its own merchant's intents.
+  // A platform key is refused by the guard.
+  @Get()
+  @Roles(['MERCHANT_ADMIN', 'MERCHANT_READ_ONLY'])
+  @ApiOperation({
+    summary: 'List payment intents',
+    description:
+      'Roles: MERCHANT_ADMIN and MERCHANT_READ_ONLY list the intents of their own merchant, whatever its status. Pages are ordered newest first, by creation time and then id, and continue with next_cursor. status keeps only the intents in that status. PLATFORM_ADMIN is 403. A list writes no audit event.',
+  })
+  @ApiResponse({
+    status: 200,
+    description:
+      'One page of intents. Each item has the same body as a single read; amount_minor is an integer string.',
+    standardSchema: paymentIntentListResponseSchema,
+  })
+  @ApiErrorResponses(
+    {
+      status: 400,
+      description:
+        'VALIDATION_FAILED: limit is not an integer from 1 to 100, cursor is not a next_cursor of this API, status is not a payment intent status, or the query names an unknown parameter. The answer does not depend on any merchant.',
+    },
+    {
+      status: 401,
+      description:
+        'UNAUTHENTICATED: the API key or session token is missing, malformed, unknown, wrong, revoked, or expired, or the user is disabled.',
+    },
+    {
+      status: 403,
+      description:
+        'INSUFFICIENT_ROLE: a platform key or user cannot list payment intents.',
+    },
+    {
+      status: 500,
+      description:
+        'INTERNAL_ERROR: unexpected failure, including a stored intent on the page that this version cannot represent, such as one in an unsupported currency.',
+    },
+  )
+  async list(
+    @CurrentPrincipal() principal: Principal,
+    @Query({ schema: listPaymentIntentsQuerySchema })
+    query: ListPaymentIntentsQuery,
+  ): Promise<PaymentIntentListResponse> {
+    const result = await this.listPaymentIntents.execute({
+      principal,
+      limit: query.limit,
+      after: query.cursor,
+      status: query.status,
+    });
+    if (!result.ok) throw toListApiException(result.code);
+    return toPaymentIntentListResponse(result.page);
   }
 
   // The path names an intent and no merchant, so listing the merchant roles

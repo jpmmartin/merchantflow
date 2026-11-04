@@ -4,6 +4,10 @@ import {
   isSupportedCurrency,
 } from '@merchantflow/domain';
 import { z } from 'zod';
+import {
+  pageCursorQuerySchema,
+  pageLimitQuerySchema,
+} from '../../pagination/keyset-cursor.js';
 
 // The currencies Money supports are the keys of its exponent table; the
 // OpenAPI document lists exactly them, as for merchant creation (AD-58).
@@ -60,3 +64,33 @@ export const paymentIntentResponseSchema = z.object({
 });
 
 export type PaymentIntentResponse = z.infer<typeof paymentIntentResponseSchema>;
+
+/**
+ * The query of a list request. `status` is one of `PAYMENT_INTENT_STATUSES`,
+ * so a status the domain adds is accepted here with no change; any other
+ * parameter, `merchant_id` included, is refused.
+ */
+export const listPaymentIntentsQuerySchema = z.strictObject({
+  limit: pageLimitQuerySchema,
+  cursor: pageCursorQuerySchema,
+  status: z
+    .enum(PAYMENT_INTENT_STATUSES)
+    .optional()
+    .describe('Only intents with this status. Without it, every status.'),
+});
+
+export type ListPaymentIntentsQuery = z.infer<
+  typeof listPaymentIntentsQuerySchema
+>;
+
+export const paymentIntentListResponseSchema = z.object({
+  data: z.array(paymentIntentResponseSchema),
+  next_cursor: z
+    .string()
+    .nullable()
+    .describe('Pass it as cursor for the next page; null on the last page.'),
+});
+
+export type PaymentIntentListResponse = z.infer<
+  typeof paymentIntentListResponseSchema
+>;
