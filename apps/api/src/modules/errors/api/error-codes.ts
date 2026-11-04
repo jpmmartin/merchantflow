@@ -31,6 +31,13 @@ export const ERROR_CODES = [
   'PROCESSOR_ACCOUNT_DISABLED',
   'PROCESSOR_UNAVAILABLE',
   'CREDENTIALS_KEY_NOT_CONFIGURED',
+  'PAYMENT_OUTCOME_UNKNOWN',
+  'PAYMENT_ATTEMPT_IN_PROGRESS',
+  'PAYMENT_INTENT_NOT_CONFIRMABLE',
+  'PAYMENT_ACTION_NOT_PENDING',
+  'PROCESSOR_ACCOUNT_NOT_FOUND',
+  'PROCESSOR_ACCOUNT_NOT_DEFAULT',
+  'PROCESSOR_LOOKUP_UNAVAILABLE',
   'PAYLOAD_TOO_LARGE',
   'UNSUPPORTED_MEDIA_TYPE',
   'REQUEST_REJECTED',
@@ -210,11 +217,55 @@ export const ERROR_DEFINITIONS: Readonly<Record<ErrorCode, ErrorDefinition>> = {
       'The processor could not validate the credentials. Nothing was changed; retry later.',
   },
   // The master key that encrypts processor secrets is not configured, so no
-  // account can be connected.
+  // account can be connected and no account's secret can be used.
   CREDENTIALS_KEY_NOT_CONFIGURED: {
     status: 503,
     message:
-      'Processor accounts cannot be connected until the credentials master key is configured.',
+      'Processor accounts cannot be connected or used until the credentials master key is configured.',
+  },
+  // An attempt of the payment intent may have charged and its outcome is not
+  // known yet, so no new attempt can start under any key until it is
+  // resolved. Paying again could charge twice.
+  PAYMENT_OUTCOME_UNKNOWN: {
+    status: 409,
+    message:
+      'A previous attempt of this payment has an unknown outcome; do not pay again until it is resolved.',
+  },
+  // Another attempt of the payment intent is executing or waits for the
+  // customer's action, such as 3D Secure.
+  PAYMENT_ATTEMPT_IN_PROGRESS: {
+    status: 409,
+    message: 'Another attempt of this payment is still in progress.',
+  },
+  // The payment intent is SUCCEEDED or FAILED; neither status accepts a new
+  // attempt.
+  PAYMENT_INTENT_NOT_CONFIRMABLE: {
+    status: 409,
+    message: 'The payment is in a final status and cannot be confirmed.',
+  },
+  // A completion was requested for a payment intent that is not waiting for
+  // customer action, for example because its result was already applied.
+  PAYMENT_ACTION_NOT_PENDING: {
+    status: 409,
+    message: 'The payment is not waiting for customer action.',
+  },
+  // The processor account named by the request does not exist for the
+  // merchant; another merchant's account is answered the same way.
+  PROCESSOR_ACCOUNT_NOT_FOUND: {
+    status: 422,
+    message: 'The processor account was not found for this merchant.',
+  },
+  // A new payment uses only the merchant's default processor account.
+  PROCESSOR_ACCOUNT_NOT_DEFAULT: {
+    status: 409,
+    message: "The processor account is not the merchant's default account.",
+  },
+  // The provider could not report the payment's current state. Nothing was
+  // changed; the request can be sent again.
+  PROCESSOR_LOOKUP_UNAVAILABLE: {
+    status: 503,
+    message:
+      'The processor could not report the payment status. Nothing was changed; retry later.',
   },
   PAYLOAD_TOO_LARGE: {
     status: 413,

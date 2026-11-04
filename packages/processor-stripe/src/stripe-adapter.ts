@@ -1,21 +1,56 @@
 import type {
   CredentialValidationResult,
+  GetTransactionInput,
   ProcessorAdapter,
   ProcessorCapability,
   ProcessorCredentials,
+  ProcessorPaymentResult,
+  ProcessorTransactionLookup,
+  SaleInput,
 } from '@merchantflow/processor-contracts';
 import Stripe from 'stripe';
+import { toStripeAmount } from './stripe-amount.js';
 import { checkStripeKey } from './stripe-keys.js';
+import {
+  PAYMENT_INTENT_ID,
+  PAYMENT_METHOD_ID,
+  lookupErrorResult,
+  paymentIntentResult,
+  saleErrorResult,
+} from './stripe-results.js';
 
 /** Provider code of the Stripe adapter. */
 export const STRIPE_PROVIDER = 'stripe';
 
 export interface StripeAdapterOptions {
-  /** Longest time one request to Stripe may take, in milliseconds. */
+  /** Longest time one read from Stripe may take, in milliseconds. */
   readonly timeoutMs?: number;
+  /** Longest time one try of a sale may take, in milliseconds. */
+  readonly saleTimeoutMs?: number;
 }
 
 const DEFAULT_TIMEOUT_MS = 10_000;
+
+/**
+ * A card confirmation, 3D Secure included, normally answers within a few
+ * seconds; a try that takes longer ends as a connection error, which is an
+ * unknown outcome.
+ */
+const DEFAULT_SALE_TIMEOUT_MS = 20_000;
+
+/**
+ * Automatic retries of a read. A read changes nothing, so one more try cannot
+ * duplicate anything.
+ */
+const READ_MAX_NETWORK_RETRIES = 1;
+
+/**
+ * Automatic retries of a sale after a broken connection, a timeout, a
+ * conflict, or a server error. Every try sends the operation ID as the same
+ * `Idempotency-Key`, so Stripe answers a retry of an executed request with its
+ * first result instead of charging again.
+ */
+const SALE_MAX_NETWORK_RETRIES = 2;
 
 /**
  * Stripe behind the processor port. The adapter holds no credentials: every
@@ -28,11 +63,29 @@ export class StripeAdapter implements ProcessorAdapter {
   readonly provider = STRIPE_PROVIDER;
   readonly capabilities: ReadonlySet<ProcessorCapability> = new Set([
     'CREDENTIAL_VALIDATION',
+    'SALE',
+    'TRANSACTION_LOOKUP',
+    'PROVIDER_IDEMPOTENCY',
   ]);
   private readonly timeoutMs: number;
+  private readonly saleTimeoutMs: number;
 
   constructor(options: StripeAdapterOptions = {}) {
     this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    this.saleTimeoutMs = options.saleTimeoutMs ?? DEFAULT_SALE_TIMEOUT_MS;
+  }
+
+  /** A client for one account's secret key, dropped when the call returns. */
+  private client(
+    secretKey: string,
+    settings: { readonly timeout: number; readonly maxNetworkRetries: number },
+  ): Stripe {
+    return new Stripe(secretKey, {
+      timeout: settings.timeout,
+      maxNetworkRetries: settings.maxNetworkRetries,
+      telemetry: false,
+      appInfo: { name: 'MerchantFlow' },
+    });
   }
 
   /**
@@ -54,12 +107,10 @@ export class StripeAdapter implements ProcessorAdapter {
       return { outcome: 'rejected', reason: formatProblem };
     }
 
-    const client = new Stripe(credentials.secretKey, {
+    // Both calls are reads, so an automatic retry cannot duplicate anything.
+    const client = this.client(credentials.secretKey, {
       timeout: this.timeoutMs,
-      // Both calls are reads, so one automatic retry cannot duplicate anything.
-      maxNetworkRetries: 1,
-      telemetry: false,
-      appInfo: { name: 'MerchantFlow' },
+      maxNetworkRetries: READ_MAX_NETWORK_RETRIES,
     });
     try {
       const account = await client.accounts.retrieveCurrent();
@@ -71,6 +122,93 @@ export class StripeAdapter implements ProcessorAdapter {
     } catch (error) {
       return classifyStripeError(error);
     }
+  }
+
+  /**
+   * Creates and confirms one PaymentIntent (`POST /v1/payment_intents` with
+   * `confirm: true`) with automatic capture, for card payment methods only, so
+   * no redirect-based method can be offered. `use_stripe_sdk: true` asks
+   * Stripe to describe a 3D Secure step for Stripe.js, which runs it in the
+   * page with `handleNextAction`. The operation ID is the idempotency key of
+   * every try, and the merchant, intent, and attempt IDs are the metadata.
+   *
+   * Refused before any call, as `failed_before_execution`: a key that is not
+   * a test secret key, a payment method that is not a `pm_` ID, and an amount
+   * that `toStripeAmount` refuses.
+   */
+  async sale(input: SaleInput): Promise<ProcessorPaymentResult> {
+    if (checkStripeKey(input.credentials.secretKey, 'secret') !== undefined) {
+      return { status: 'failed_before_execution', category: 'CONFIGURATION' };
+    }
+    if (!PAYMENT_METHOD_ID.test(input.paymentMethod)) {
+      return { status: 'failed_before_execution', category: 'INVALID_REQUEST' };
+    }
+    const amount = toStripeAmount(input.amount);
+    if (!amount.ok) {
+      return { status: 'failed_before_execution', category: 'INVALID_REQUEST' };
+    }
+
+    const client = this.client(input.credentials.secretKey, {
+      timeout: this.saleTimeoutMs,
+      maxNetworkRetries: SALE_MAX_NETWORK_RETRIES,
+    });
+    let intent: Stripe.PaymentIntent;
+    try {
+      intent = await client.paymentIntents.create(
+        {
+          amount: amount.amount,
+          currency: amount.currency,
+          payment_method: input.paymentMethod,
+          // The SDK's API version (2026-10-28.endive) names the list of
+          // accepted payment method types `allowed_payment_method_types`.
+          allowed_payment_method_types: ['card'],
+          capture_method: 'automatic',
+          confirm: true,
+          use_stripe_sdk: true,
+          metadata: {
+            merchant_id: input.references.merchantId,
+            payment_intent_id: input.references.paymentIntentId,
+            payment_attempt_id: input.references.paymentAttemptId,
+          },
+        },
+        { idempotencyKey: input.operationId },
+      );
+    } catch (error) {
+      return saleErrorResult(error);
+    }
+    return paymentIntentResult(intent);
+  }
+
+  /**
+   * Retrieves one PaymentIntent by its ID (`GET /v1/payment_intents/:id`), a
+   * read that changes nothing. A PaymentIntent in live mode is refused as an
+   * unusable answer.
+   */
+  async getTransaction(
+    input: GetTransactionInput,
+  ): Promise<ProcessorTransactionLookup> {
+    if (checkStripeKey(input.credentials.secretKey, 'secret') !== undefined) {
+      return { outcome: 'unavailable', category: 'CONFIGURATION' };
+    }
+    if (!PAYMENT_INTENT_ID.test(input.providerTransactionId)) {
+      return { outcome: 'unavailable', category: 'INVALID_REQUEST' };
+    }
+    const client = this.client(input.credentials.secretKey, {
+      timeout: this.timeoutMs,
+      maxNetworkRetries: READ_MAX_NETWORK_RETRIES,
+    });
+    let intent: Stripe.PaymentIntent;
+    try {
+      intent = await client.paymentIntents.retrieve(
+        input.providerTransactionId,
+      );
+    } catch (error) {
+      return lookupErrorResult(error);
+    }
+    if (intent.livemode) {
+      return { outcome: 'unavailable', category: 'CONFIGURATION' };
+    }
+    return { outcome: 'found', result: paymentIntentResult(intent) };
   }
 }
 

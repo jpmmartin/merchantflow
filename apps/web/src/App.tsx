@@ -91,7 +91,7 @@ function SignedInRoutes({
       ) : null}
       <Route
         path="/payments/:paymentIntentId"
-        element={<PaymentDetailPage />}
+        element={<PaymentDetailPage principal={principal} />}
       />
       <Route path="/account" element={<AccountPage principal={principal} />} />
       <Route path="*" element={<Navigate to={home} replace />} />

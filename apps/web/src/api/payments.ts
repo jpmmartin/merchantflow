@@ -72,3 +72,89 @@ export async function getPaymentIntent(id: string): Promise<PaymentIntent> {
     `/payment-intents/${encodeURIComponent(id)}`,
   )) as PaymentIntent;
 }
+
+/** Statuses of a payment attempt, as the API returns them. */
+export type PaymentAttemptStatus =
+  | 'EXECUTING'
+  | 'REQUIRES_ACTION'
+  | 'SUCCEEDED'
+  | 'DECLINED'
+  | 'FAILED'
+  | 'UNKNOWN';
+
+/** One execution of an intent against a processor account. */
+export interface PaymentAttempt {
+  readonly id: string;
+  readonly payment_intent_id: string;
+  readonly merchant_id: string;
+  readonly processor_account_id: string;
+  readonly status: PaymentAttemptStatus;
+  readonly provider_transaction_id: string | null;
+  readonly decline_code: string | null;
+  readonly error_category: string | null;
+  readonly created_at: string;
+  readonly updated_at: string;
+}
+
+/**
+ * The answer of a confirmation or a completion. `next_action` is present only
+ * while the customer must authenticate; its client secret goes to Stripe.js
+ * and is never kept.
+ */
+export interface PaymentConfirmation {
+  readonly payment_intent: PaymentIntent;
+  readonly attempt: PaymentAttempt;
+  readonly next_action: {
+    readonly type: 'CUSTOMER_AUTHENTICATION';
+    readonly client_secret: string;
+  } | null;
+}
+
+export interface PaymentAttemptList {
+  readonly payment_intent_id: string;
+  readonly merchant_id: string;
+  readonly data: readonly PaymentAttempt[];
+}
+
+/**
+ * Pays an intent with a payment method created by Stripe.js, through the
+ * account whose publishable key created it, under `idempotencyKey`. Sending
+ * the same payment method with the same key again returns the stored answer
+ * instead of charging twice.
+ */
+export async function confirmPaymentIntent(
+  id: string,
+  payment: {
+    readonly payment_method: string;
+    readonly processor_account_id: string;
+  },
+  idempotencyKey: string,
+): Promise<PaymentConfirmation> {
+  return (await apiRequest(
+    'POST',
+    `/payment-intents/${encodeURIComponent(id)}/confirm`,
+    { body: payment, headers: { 'Idempotency-Key': idempotencyKey } },
+  )) as PaymentConfirmation;
+}
+
+/**
+ * Asks the API to read the result of the customer's action from Stripe and
+ * apply it. Safe to call more than once.
+ */
+export async function completePaymentAction(
+  id: string,
+): Promise<PaymentConfirmation> {
+  return (await apiRequest(
+    'POST',
+    `/payment-intents/${encodeURIComponent(id)}/complete-action`,
+  )) as PaymentConfirmation;
+}
+
+export async function listPaymentAttempts(
+  id: string,
+): Promise<PaymentAttemptList> {
+  return (await apiRequest(
+    'GET',
+    `/payment-intents/${encodeURIComponent(id)}/attempts`,
+  )) as PaymentAttemptList;
+}

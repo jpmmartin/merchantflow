@@ -15,6 +15,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
+    "@merchantflow/domain": "workspace:*",
     "@merchantflow/processor-contracts": "workspace:*",
     "stripe": "23.1.0"
   },

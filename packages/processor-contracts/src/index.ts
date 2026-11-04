@@ -13,6 +13,12 @@ export {
   PROCESSOR_ERROR_CATEGORIES,
   type ProcessorErrorCategory,
 } from './error-category.js';
+export type {
+  GetTransactionInput,
+  ProcessorOperationReferences,
+  ProcessorTransactionLookup,
+  SaleInput,
+} from './payment-operations.js';
 export {
   PROCESSOR_PAYMENT_STATUSES,
   assertNever,

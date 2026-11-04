@@ -8,24 +8,25 @@ MerchantFlow is a payment orchestration reference platform built as a modular mo
 
 Today the repository contains the runnable foundation only:
 
-- a pnpm workspace with a NestJS API (`apps/api`), a PostgreSQL access package (`packages/database`), a provider-agnostic processor port (`packages/processor-contracts`), a Stripe adapter (`packages/processor-stripe`), and a web frontend (`apps/web`, React, Vite, and Bootstrap 5) with sign-in, merchant management, the users, API keys, and Stripe accounts of each merchant, and the payment orders of a merchant user (see Web frontend);
+- a pnpm workspace with a NestJS API (`apps/api`), a PostgreSQL access package (`packages/database`), a provider-agnostic processor port (`packages/processor-contracts`), a Stripe adapter (`packages/processor-stripe`), and a web frontend (`apps/web`, React, Vite, and Bootstrap 5) with sign-in, merchant management, the users, API keys, and Stripe accounts of each merchant, and the payment orders of a merchant user, paid with a card in Stripe's own fields, 3D Secure included (see Web frontend);
 - liveness and readiness endpoints, `GET /health/live` and `GET /health/ready`;
 - validated environment configuration that stops the API at startup when it is invalid;
 - structured JSON logs with a correlation ID on every request;
 - one error format for every failure, with a stable `code`, a safe message, and the correlation ID, plus request validation with Zod and an OpenAPI document served outside production (see API conventions);
 - a forward-only SQL migration runner (`pnpm db:migrate`);
-- database tables for merchants, API keys, users, user sessions, processor accounts, an append-only audit trail, idempotency records, and payment intents, with the constraints enforced by PostgreSQL itself;
+- database tables for merchants, API keys, users, user sessions, processor accounts, an append-only audit trail, idempotency records, payment intents, and payment attempts, with the constraints enforced by PostgreSQL itself;
 - API keys: 256 bits of randomness, only a lookup identifier and a SHA-256 hash stored, and an audit event for each issuance and revocation;
 - request authentication: a global guard checks the `Authorization: Bearer <token>` header, an API key or a user session token, against the stored hash on every request, with deny-by-default routing and role checks (see Authentication);
 - user sign-in: `POST /api/v1/auth/login` with an email and a password (scrypt hashes only), `POST /api/v1/auth/logout`, and `GET /api/v1/auth/me`;
 - merchant endpoints under `/api/v1/merchants`: create, read, list with stable pagination, update, change status, list, issue, and revoke API keys, create, list, and disable merchant users, and connect, list, disable, and choose the default of Stripe test accounts, each with role rules, tenant isolation, and an audit event for each change (see Merchant endpoints);
 - payment intent creation, `POST /api/v1/payment-intents`, with a required `Idempotency-Key` and protection against a second intent for the same merchant order (see Payment intents); nothing is charged;
 - payment intent retrieval, `GET /api/v1/payment-intents/{id}`, and listing, `GET /api/v1/payment-intents`, newest first with stable pagination and a status filter, both scoped to the merchant of the key (see Payment intents);
+- payment confirmation through Stripe in test mode, `POST /api/v1/payment-intents/{id}/confirm`, with a required `Idempotency-Key`, the merchant's default Stripe account, and no database transaction open during the Stripe call; 3D Secure completion, `POST /api/v1/payment-intents/{id}/complete-action`; and the attempt history, `GET /api/v1/payment-intents/{id}/attempts` (see Confirming a payment intent);
 - a development seed, `pnpm db:seed`, that creates the first platform administrator key and the platform administrator user (see Demonstration: two merchants, neither sees the other, and Web frontend);
 - linting, formatting, type checking, unit tests, and integration tests against a real PostgreSQL started with Testcontainers, including an HTTP concurrency suite (`tests/concurrency`) that sends 50 simultaneous requests to the listening API and checks that duplicates create one intent;
 - a GitHub Actions workflow that runs the same checks.
 
-Confirming (charging) a payment intent, any call to Stripe other than validating an account's keys, the simulated processor, the ledger, and every other business capability are planned and do not exist yet.
+Recovery of payments with an unknown outcome, the simulated processor, the ledger, refunds, capture and void, Stripe webhooks, and every other business capability are planned and do not exist yet.
 
 ## Prerequisites
 
@@ -186,7 +187,7 @@ The first platform administrator key cannot be created through the API; `pnpm db
 
 ## Processor accounts
 
-A merchant collects payments through a processor account. For now the only provider is Stripe, in **test mode only**; no payment is sent to Stripe yet (planned).
+A merchant collects payments through a processor account. For now the only provider is Stripe, in **test mode only**. New payments use the merchant's enabled default account (see Confirming a payment intent).
 
 - `POST .../processor-accounts` with `{"provider": "stripe", "display_name": "...", "credentials": {"secret_key": "sk_test_...", "publishable_key": "pk_test_..."}}` validates the keys and stores the account (`201`, `Cache-Control: no-store`):
   - a live key (`sk_live_`, `rk_live_`, `pk_live_`) is `422 PROCESSOR_LIVE_CREDENTIALS_REJECTED` before any call to Stripe; a key of another format is `422 PROCESSOR_CREDENTIALS_INVALID`;
@@ -203,7 +204,7 @@ To try it, use the test keys of your own Stripe sandbox (Dashboard, Developers, 
 
 ## Payment intents
 
-A payment intent is a merchant's intention to collect an amount. Creating one charges nothing; confirming it through a processor is planned.
+A payment intent is a merchant's intention to collect an amount. Creating one charges nothing; confirming it charges it (see Confirming a payment intent).
 
 `POST /api/v1/payment-intents` needs a `MERCHANT_ADMIN` key of an `ACTIVE` merchant and an `Idempotency-Key` header. The intent always belongs to the merchant of the key.
 
@@ -263,8 +264,47 @@ curl -sS -w '\nHTTP %{http_code}\n' 'http://127.0.0.1:3000/api/v1/payment-intent
 
 - The intents are ordered newest first, by creation time and then id. Each item has the same body as `GET /api/v1/payment-intents/{id}`.
 - `limit` is 1 to 100 (default 20). Pass `next_cursor` back unchanged as `cursor`, with the same `status`; it is `null` on the last page. An invalid cursor is a `400`. A walk over the pages never repeats an intent, and never skips one that existed when it began.
-- `status` keeps only the intents in that status: `CREATED`, `PROCESSING`, `SUCCEEDED`, `FAILED`, or `UNKNOWN` (the OpenAPI document lists them). Any other value, a lower-case one included, is a `400 VALIDATION_FAILED`.
+- `status` keeps only the intents in that status: `CREATED`, `PROCESSING`, `REQUIRES_ACTION`, `SUCCEEDED`, `FAILED`, or `UNKNOWN` (the OpenAPI document lists them). Any other value, a lower-case one included, is a `400 VALIDATION_FAILED`.
 - The merchant always comes from the key: a `merchant_id` or any other unknown query parameter is a `400`, and a header naming another merchant is ignored. A `PLATFORM_ADMIN` key or user gets `403 INSUFFICIENT_ROLE`. A `DRAFT` or `SUSPENDED` merchant can still list its intents. A list writes no audit event.
+
+### Confirming a payment intent
+
+`POST /api/v1/payment-intents/{id}/confirm` charges a `CREATED` intent once through Stripe, in test mode. It needs a `MERCHANT_ADMIN` key or user of an `ACTIVE` merchant and an `Idempotency-Key` header.
+
+```bash
+curl -sS -w '\nHTTP %{http_code}\n' -X POST http://127.0.0.1:3000/api/v1/payment-intents/<intent id>/confirm \
+  -H "Authorization: Bearer $KEY_A" -H 'Content-Type: application/json' \
+  -H 'Idempotency-Key: order-1001-pay-1' \
+  -d '{"payment_method":"pm_card_visa","processor_account_id":"<default account id>"}'
+```
+
+- `payment_method` is a payment method token created in the browser by Stripe.js with the account's publishable key (`pm_...`); card data never reaches the API, and a card number in this field is a `400`. Stripe's test tokens such as `pm_card_visa` also work from a server.
+- `processor_account_id` is the account whose publishable key created the payment method, so the publishable and secret keys always belong to one Stripe account. It must be the merchant's account (`422 PROCESSOR_ACCOUNT_NOT_FOUND` otherwise, also for another merchant's account), enabled (`409 PROCESSOR_ACCOUNT_DISABLED`), and its default (`409 PROCESSOR_ACCOUNT_NOT_DEFAULT`).
+- The API creates and confirms one Stripe PaymentIntent with automatic capture, for cards only, with the attempt's `operation_id` as Stripe's idempotency key and `merchant_id`, `payment_intent_id`, and `payment_attempt_id` as its metadata.
+- The answer is `{"payment_intent": {...}, "attempt": {...}, "next_action": ...}` with `Cache-Control: no-store`:
+
+| Outcome at Stripe | HTTP | Attempt | Intent | Stored under the key |
+| --- | --- | --- | --- | --- |
+| Captured | `200` | `SUCCEEDED` | `SUCCEEDED` | Yes |
+| Declined | `200` | `DECLINED`, with `decline_code` | `CREATED`, or `FAILED` at the third unsuccessful attempt | Yes |
+| Refused before execution (for example an invalid payment method) | `200` | `FAILED`, with `error_category` | `CREATED`, or `FAILED` at the third unsuccessful attempt | Yes |
+| 3D Secure required | `200` | `REQUIRES_ACTION` | `REQUIRES_ACTION` | No; `next_action.client_secret` is for Stripe.js only |
+| Timeout, connection error, Stripe server error, or an unproven status | `202` | `UNKNOWN` | `UNKNOWN` | No |
+
+- The same key with the same request returns the stored answer byte for byte, also after the merchant was suspended, and never creates a second Stripe PaymentIntent. While the attempt is `REQUIRES_ACTION` or `UNKNOWN`, or still running, the same key gets `409 OPERATION_IN_PROGRESS`. The same key with a different request is `409 IDEMPOTENCY_KEY_REUSED`. A refused request stores nothing.
+- One attempt at a time: a new key while an attempt is executing or waits for 3D Secure is `409 PAYMENT_ATTEMPT_IN_PROGRESS`; while an outcome is unknown it is `409 PAYMENT_OUTCOME_UNKNOWN` (do not pay again). A `SUCCEEDED` or `FAILED` intent is `409 PAYMENT_INTENT_NOT_CONFIRMABLE`.
+- Another merchant's intent is `404 NOT_FOUND`; `MERCHANT_READ_ONLY` gets `403 INSUFFICIENT_ROLE`, and so does a platform key for every id. A `DRAFT` or `SUSPENDED` merchant is `403 MERCHANT_NOT_ACTIVE`.
+- Each applied result writes one `PAYMENT_INTENT_CONFIRMED` audit event. The client secret never reaches a log line, an audit event, an error, or the database.
+
+### Completing 3D Secure
+
+After Stripe.js `handleNextAction` ran the challenge in the browser, `POST /api/v1/payment-intents/{id}/complete-action` (`MERCHANT_ADMIN`, no body) reads the PaymentIntent from Stripe and applies the result: `SUCCEEDED`, or `DECLINED` when authentication failed or the card was declined (back to `CREATED`, or `FAILED` at the third), or `UNKNOWN` (`202`) when Stripe's status does not establish the outcome. A conclusive result also becomes the stored answer of the confirmation's key, and writes one `PAYMENT_INTENT_ACTION_COMPLETED` audit event. It is safe to call more than once: while the payment still requires action nothing changes and `next_action.client_secret` is returned again; after a result was applied it is `409 PAYMENT_ACTION_NOT_PENDING`. Stripe unreachable is `503 PROCESSOR_LOOKUP_UNAVAILABLE` and changes nothing.
+
+### Attempt history
+
+`GET /api/v1/payment-intents/{id}/attempts` (`MERCHANT_ADMIN` and `MERCHANT_READ_ONLY`) returns `{"payment_intent_id", "merchant_id", "data": [...]}` with every attempt of the intent, oldest first: `id`, `processor_account_id`, `status` (`EXECUTING`, `REQUIRES_ACTION`, `SUCCEEDED`, `DECLINED`, `FAILED`, or `UNKNOWN`), `provider_transaction_id` (the Stripe `pi_` ID), `decline_code`, `error_category`, `created_at`, and `updated_at`. Another merchant's intent is `404`.
+
+To find a payment in Stripe, open the Dashboard of the merchant's sandbox, go to **Payments** (test mode), and search for the attempt's `pi_` ID; its metadata holds the MerchantFlow IDs.
 
 ## Demonstration: two merchants, neither sees the other
 
@@ -380,7 +420,9 @@ Alternatively, `docker compose down --volumes` followed by the Quick start gives
 - for a merchant user, a **Payments** section (the platform administrator does not have it, because the payment endpoints refuse platform roles):
   - the list (`/payments`): reference, amount, currency, status, and creation time, newest first, a status filter kept in the URL (`/payments?status=CREATED`), **Load more** for the next page, and a click on a row to open the order;
   - the create form (`/payments/new`, `MERCHANT_ADMIN` only): the amount is typed in major units, such as `100.50`, and sent as `amount_minor` (`"10050"`); the currency is the merchant's default currency and cannot be changed; the order reference is the merchant's own identifier. An amount that is empty, negative, malformed, or has more decimals than the currency allows (`100.505` for USD) is refused before anything is sent. Errors show their code, correlation ID, and for `VALIDATION_FAILED` the invalid fields. A successful creation opens the order's page;
-  - the order's page (`/payments/{id}`), with every field, the formatted amount, and the status as a badge. Another merchant's order, or an unknown id, shows the API's `404`.
+  - the order's page (`/payments/{id}`), with every field, the formatted amount, the status as a badge, and the attempt history (account, status, Stripe `pi_` ID, decline code, error category, times). Another merchant's order, or an unknown id, shows the API's `404`;
+  - on a `CREATED` order, for `MERCHANT_ADMIN`, **Pay with a card**: Stripe's card field (Stripe Elements) loaded with the publishable key of the merchant's enabled default account, a list of Stripe test cards, and **Pay**. Stripe.js turns the card into a payment method in the browser and only its `pm_` ID reaches the API. 3D Secure opens Stripe's challenge in the page and the result is applied right after. The page then shows the outcome: success, a decline with its code and "try another card", or an unknown outcome with a warning not to pay again. Without an enabled default account the section links to the merchant's processor accounts;
+  - on a `REQUIRES_ACTION` order, **Continue authentication** opens the 3D Secure challenge again, for example after a reload.
 
 1. With the stack running and the dependencies installed (Quick start steps 1 and 2), apply the migrations and run the seed. The seed prints the administrator's email and a generated password **once**; store the password.
 
@@ -400,6 +442,9 @@ Alternatively, `docker compose down --volumes` followed by the Quick start gives
 
 Notes:
 
+- The pay section uses one `Idempotency-Key` per payment method. After a network error, `409 OPERATION_IN_PROGRESS`, or a `5xx`, **Send the same payment again** reuses the same payment method and key, so it cannot charge twice; entering a card again creates a new payment method and a new key.
+- Stripe test cards (any future expiry date, any CVC, any postal code): `4242 4242 4242 4242` succeeds; `4000 0000 0000 9995` is declined (insufficient funds); `4000 0000 0000 3220` asks for 3D Secure and then succeeds; `4000 0084 0000 1629` asks for 3D Secure and is then declined. In the test challenge, **Complete** authenticates and **Fail** refuses.
+- Stripe.js is loaded from `js.stripe.com` only when a pay section opens.
 - The create form generates one `Idempotency-Key` per order. Sending the same values again after any failure, such as a network error or a `503`, reuses it, so an order whose answer was lost is not created twice. Different values, or a successful creation, start a new key. Values are compared as sent, so `100.5` and `100.50` are the same order.
 - Amounts are converted and displayed with text operations only and never pass through a JavaScript `number`.
 - Any API error is shown with its `code` and correlation ID. A `401` on any call after sign-in clears the token and returns to the sign-in screen.
@@ -476,9 +521,11 @@ Keep it: losing it makes every stored secret key unreadable, and the accounts mu
 
 - A request the JSON body parser rejects (malformed JSON, for instance) receives the standard error but writes no access log line.
 - No rate limit or input size limit beyond the parser's default exists yet, sign-in included. There is no password reset, email verification, or multi-factor authentication.
-- Every merchant user is `MERCHANT_ADMIN`; there is no role choice, re-enabling, password change, or deletion of users yet, and the lists of a merchant's users and keys are not paginated. Platform users are created only by the seed. Only payment intent creation takes an idempotency key: creating a merchant twice creates two merchants.
-- There is no endpoint to confirm a payment intent yet; idempotency records are kept and never deleted (no purge exists). `payment_intents` rejects deletes and changes of an intent's amount, currency, reference, or merchant through triggers that a database superuser or the table owner can still disable.
-- The other business endpoints are the merchant endpoints: no platform key can be issued through the API; the development seed is the only way to create one, and a lost platform key is replaced by revoking it in the database (see Recover a lost platform key). Payment confirmation, payments through Stripe, the simulated processor, ledger, and dashboard are planned.
+- Every merchant user is `MERCHANT_ADMIN`; there is no role choice, re-enabling, password change, or deletion of users yet, and the lists of a merchant's users and keys are not paginated. Platform users are created only by the seed. Only payment intent creation and confirmation take an idempotency key: creating a merchant twice creates two merchants.
+- **A payment whose outcome is unknown stays blocked.** Automatic recovery does not exist yet: a crash of the API while it waits for Stripe, a failure to record Stripe's answer, or an `UNKNOWN` result (a timeout, a connection error, a Stripe server error) leaves the attempt `EXECUTING` or `UNKNOWN` and the intent `PROCESSING` or `UNKNOWN`, and no new attempt is accepted for it until recovery exists. Check such a payment in the Stripe Dashboard by its metadata. A payment left in `REQUIRES_ACTION` also blocks new attempts until the customer completes or fails the challenge.
+- Payments use Stripe in test mode and cards only, with automatic capture; there is no ledger, refund, manual capture, void, or webhook yet. Stripe's PaymentIntent amount limit (99,999,999 minor units) is refused before any call, as a `FAILED` attempt.
+- Idempotency records are kept and never deleted (no purge exists). `payment_intents` and `payment_attempts` reject deletes, and changes of an intent's amount, currency, reference, or merchant or of a finished attempt, through triggers that a database superuser or the table owner can still disable.
+- The other business endpoints are the merchant endpoints: no platform key can be issued through the API; the development seed is the only way to create one, and a lost platform key is replaced by revoking it in the database (see Recover a lost platform key). The simulated processor, ledger, and dashboard are planned.
 - The error responses of the health endpoints and of the unknown-route handler are not described in the OpenAPI document.
 - A merchant or payment intent created by a transaction that commits late can be missed by a list walk already past its position; the next walk shows it.
 - The status filter of the payment intent list reads the merchant's intents newest first and keeps those in the status, so a rare status among many intents takes longer to fill a page.

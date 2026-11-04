@@ -5,8 +5,11 @@ import {
 } from '@merchantflow/domain';
 import { ApiException } from '../../errors/api/api-exception.js';
 import type { ValidationIssue } from '../../errors/api/error-response.js';
+import type { CompletePaymentActionFailureCode } from '../application/complete-payment-action.service.js';
+import type { ConfirmPaymentIntentFailureCode } from '../application/confirm-payment-intent.service.js';
 import type { CreatePaymentIntentFailureCode } from '../application/create-payment-intent.service.js';
 import type { GetPaymentIntentResult } from '../application/get-payment-intent.service.js';
+import type { ListPaymentAttemptsResult } from '../application/list-payment-attempts.service.js';
 import type { ListPaymentIntentsResult } from '../application/list-payment-intents.service.js';
 import type { CreatePaymentIntentBody } from './payment-intent.schemas.js';
 
@@ -83,4 +86,72 @@ export function amountOf(body: CreatePaymentIntentBody): PositiveMoney {
     throw new ApiException('VALIDATION_FAILED', [moneyIssue(parsed)]);
   }
   return parsed.money;
+}
+
+/** The exception for a refused confirmation. */
+export function toConfirmApiException(
+  code: ConfirmPaymentIntentFailureCode,
+): ApiException {
+  switch (code) {
+    case 'FORBIDDEN':
+      return new ApiException('INSUFFICIENT_ROLE');
+    case 'NOT_FOUND':
+      return new ApiException('NOT_FOUND');
+    case 'MERCHANT_NOT_ACTIVE':
+      return new ApiException('MERCHANT_NOT_ACTIVE');
+    case 'OPERATION_IN_PROGRESS':
+      return new ApiException('OPERATION_IN_PROGRESS');
+    case 'KEY_REUSED':
+      return new ApiException('IDEMPOTENCY_KEY_REUSED');
+    case 'LOCK_TIMEOUT':
+      return new ApiException('OPERATION_TIMEOUT');
+    case 'PAYMENT_OUTCOME_UNKNOWN':
+      return new ApiException('PAYMENT_OUTCOME_UNKNOWN');
+    case 'ATTEMPT_IN_PROGRESS':
+      return new ApiException('PAYMENT_ATTEMPT_IN_PROGRESS');
+    case 'INTENT_NOT_CONFIRMABLE':
+      return new ApiException('PAYMENT_INTENT_NOT_CONFIRMABLE');
+    case 'PROCESSOR_ACCOUNT_NOT_FOUND':
+      return new ApiException('PROCESSOR_ACCOUNT_NOT_FOUND');
+    case 'PROCESSOR_ACCOUNT_DISABLED':
+      return new ApiException('PROCESSOR_ACCOUNT_DISABLED');
+    case 'PROCESSOR_ACCOUNT_NOT_DEFAULT':
+      return new ApiException('PROCESSOR_ACCOUNT_NOT_DEFAULT');
+    case 'CREDENTIALS_KEY_NOT_CONFIGURED':
+      return new ApiException('CREDENTIALS_KEY_NOT_CONFIGURED');
+    case 'PROVIDER_UNSUPPORTED':
+      return new ApiException('PROCESSOR_PROVIDER_UNSUPPORTED');
+  }
+}
+
+/** The exception for a refused completion of a customer action. */
+export function toCompleteActionApiException(
+  code: CompletePaymentActionFailureCode,
+): ApiException {
+  switch (code) {
+    case 'FORBIDDEN':
+      return new ApiException('INSUFFICIENT_ROLE');
+    case 'NOT_FOUND':
+      return new ApiException('NOT_FOUND');
+    case 'ACTION_NOT_PENDING':
+      return new ApiException('PAYMENT_ACTION_NOT_PENDING');
+    case 'CREDENTIALS_KEY_NOT_CONFIGURED':
+      return new ApiException('CREDENTIALS_KEY_NOT_CONFIGURED');
+    case 'PROVIDER_UNSUPPORTED':
+      return new ApiException('PROCESSOR_PROVIDER_UNSUPPORTED');
+    case 'LOOKUP_UNAVAILABLE':
+      return new ApiException('PROCESSOR_LOOKUP_UNAVAILABLE');
+  }
+}
+
+/** The exception for a refused list of attempts. */
+export function toListAttemptsApiException(
+  code: Extract<ListPaymentAttemptsResult, { ok: false }>['code'],
+): ApiException {
+  switch (code) {
+    case 'FORBIDDEN':
+      return new ApiException('INSUFFICIENT_ROLE');
+    case 'NOT_FOUND':
+      return new ApiException('NOT_FOUND');
+  }
 }

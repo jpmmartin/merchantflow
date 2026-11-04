@@ -27,6 +27,12 @@ export type ProcessorPaymentResult =
   | {
       readonly status: 'requires_action';
       readonly providerTransactionId: string;
+      /**
+       * What the provider's browser library needs to run the customer's step,
+       * such as a Stripe client secret. It is a credential for that one
+       * transaction: it is returned to the browser and never stored or logged.
+       */
+      readonly clientSecret: string;
     }
   | {
       readonly status: 'failed_before_execution';

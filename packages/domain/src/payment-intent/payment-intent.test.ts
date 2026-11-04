@@ -14,18 +14,16 @@ describe('PAYMENT_INTENT_STATUSES', () => {
       'SUCCEEDED',
       'FAILED',
       'UNKNOWN',
+      'REQUIRES_ACTION',
     ]);
   });
 
-  it.each([
-    'REQUIRES_ACTION',
-    'REQUIRES_CAPTURE',
-    'CANCELED',
-    'PARTIALLY_REFUNDED',
-    'REFUNDED',
-  ])('does not include the later status %s', (status) => {
-    expect(PAYMENT_INTENT_STATUSES).not.toContain(status);
-  });
+  it.each(['REQUIRES_CAPTURE', 'CANCELED', 'PARTIALLY_REFUNDED', 'REFUNDED'])(
+    'does not include the later status %s',
+    (status) => {
+      expect(PAYMENT_INTENT_STATUSES).not.toContain(status);
+    },
+  );
 });
 
 describe('PaymentIntent', () => {
@@ -55,8 +53,8 @@ describe('PaymentIntent', () => {
       // @ts-expect-error plain Money may be zero or negative, a payment amount may not
       amount: zero.money,
       merchantReference: 'order',
-      // @ts-expect-error REQUIRES_ACTION is not an MVP status
-      status: 'REQUIRES_ACTION',
+      // @ts-expect-error REQUIRES_CAPTURE is not a status yet
+      status: 'REQUIRES_CAPTURE',
       createdAt: new Date(0),
       updatedAt: new Date(0),
     };

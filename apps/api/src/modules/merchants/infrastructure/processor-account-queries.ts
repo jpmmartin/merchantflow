@@ -187,3 +187,42 @@ export async function makeDefaultProcessorAccount(
     .executeTakeFirst();
   return row === undefined ? undefined : toProcessorAccount(row);
 }
+
+/** An account with the stored parts of its encrypted secret key. */
+export interface ProcessorAccountWithSecret {
+  readonly account: ProcessorAccount;
+  readonly secret: EncryptedSecret;
+}
+
+/**
+ * The account with the given id of the given merchant, with its encrypted
+ * secret, or `undefined`. Only the code that decrypts the secret for a
+ * provider call reads it.
+ */
+export async function findProcessorAccountWithSecret(
+  db: Database,
+  key: { readonly merchantId: string; readonly id: string },
+): Promise<ProcessorAccountWithSecret | undefined> {
+  const row = await db
+    .selectFrom('processor_accounts')
+    .select([
+      ...PUBLIC_COLUMNS,
+      'secret_key_ciphertext',
+      'secret_key_iv',
+      'secret_key_auth_tag',
+      'secret_key_version',
+    ])
+    .where('merchant_id', '=', key.merchantId)
+    .where('id', '=', key.id)
+    .executeTakeFirst();
+  if (row === undefined) return undefined;
+  return {
+    account: toProcessorAccount(row),
+    secret: {
+      ciphertext: row.secret_key_ciphertext,
+      iv: row.secret_key_iv,
+      authTag: row.secret_key_auth_tag,
+      keyVersion: row.secret_key_version,
+    },
+  };
+}

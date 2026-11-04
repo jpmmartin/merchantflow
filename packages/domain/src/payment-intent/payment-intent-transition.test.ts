@@ -34,6 +34,7 @@ const EXPECTED: Readonly<
     SUCCEEDED: 'NOT_ALLOWED',
     FAILED: 'NOT_ALLOWED',
     UNKNOWN: 'NOT_ALLOWED',
+    REQUIRES_ACTION: 'NOT_ALLOWED',
   },
   PROCESSING: {
     CREATED: 'RETRY',
@@ -41,6 +42,7 @@ const EXPECTED: Readonly<
     SUCCEEDED: 'ALLOWED',
     FAILED: 'EXHAUSTED',
     UNKNOWN: 'ALLOWED',
+    REQUIRES_ACTION: 'ALLOWED',
   },
   SUCCEEDED: {
     CREATED: 'TERMINAL',
@@ -48,6 +50,7 @@ const EXPECTED: Readonly<
     SUCCEEDED: 'SAME',
     FAILED: 'TERMINAL',
     UNKNOWN: 'TERMINAL',
+    REQUIRES_ACTION: 'TERMINAL',
   },
   FAILED: {
     CREATED: 'TERMINAL',
@@ -55,6 +58,7 @@ const EXPECTED: Readonly<
     SUCCEEDED: 'TERMINAL',
     FAILED: 'SAME',
     UNKNOWN: 'TERMINAL',
+    REQUIRES_ACTION: 'TERMINAL',
   },
   UNKNOWN: {
     CREATED: 'RETRY',
@@ -62,6 +66,15 @@ const EXPECTED: Readonly<
     SUCCEEDED: 'ALLOWED',
     FAILED: 'EXHAUSTED',
     UNKNOWN: 'SAME',
+    REQUIRES_ACTION: 'NOT_ALLOWED',
+  },
+  REQUIRES_ACTION: {
+    CREATED: 'RETRY',
+    PROCESSING: 'NOT_ALLOWED',
+    SUCCEEDED: 'ALLOWED',
+    FAILED: 'EXHAUSTED',
+    UNKNOWN: 'ALLOWED',
+    REQUIRES_ACTION: 'SAME',
   },
 };
 
@@ -139,6 +152,11 @@ describe('transition table', () => {
         'UNKNOWN->SUCCEEDED',
         'UNKNOWN->CREATED',
         'UNKNOWN->FAILED',
+        'PROCESSING->REQUIRES_ACTION',
+        'REQUIRES_ACTION->SUCCEEDED',
+        'REQUIRES_ACTION->CREATED',
+        'REQUIRES_ACTION->FAILED',
+        'REQUIRES_ACTION->UNKNOWN',
       ].sort(),
     );
   });

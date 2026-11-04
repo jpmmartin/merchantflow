@@ -1,9 +1,11 @@
 import type { PositiveMoney } from '../money/money.js';
 
 /**
- * Lifecycle statuses of a payment intent in the MVP. An intent is the business
- * intention to collect an amount; each execution against a processor is a
- * payment attempt with its own lifecycle, modeled separately.
+ * Lifecycle statuses of a payment intent. An intent is the business intention
+ * to collect an amount; each execution against a processor is a payment
+ * attempt with its own lifecycle, modeled separately. `REQUIRES_ACTION` means
+ * the customer must complete a step, such as 3D Secure, before the provider
+ * decides the payment.
  */
 export const PAYMENT_INTENT_STATUSES = [
   'CREATED',
@@ -11,6 +13,7 @@ export const PAYMENT_INTENT_STATUSES = [
   'SUCCEEDED',
   'FAILED',
   'UNKNOWN',
+  'REQUIRES_ACTION',
 ] as const;
 
 export type PaymentIntentStatus = (typeof PAYMENT_INTENT_STATUSES)[number];

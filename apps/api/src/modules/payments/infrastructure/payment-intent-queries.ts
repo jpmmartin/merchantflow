@@ -1,5 +1,6 @@
 import type {
   Database,
+  DatabaseTransaction,
   NewPaymentIntentRow,
   PaymentIntentRow,
 } from '@merchantflow/database';
@@ -72,6 +73,52 @@ export async function findPaymentIntentByIdForMerchant(
     .selectAll()
     .where('merchant_id', '=', merchantId)
     .where('id', '=', id)
+    .executeTakeFirst();
+  return row === undefined ? undefined : toPaymentIntent(row);
+}
+
+/**
+ * Like `findPaymentIntentByIdForMerchant`, and locks the row `FOR UPDATE` until
+ * the caller's transaction ends, so no other command of the same intent can
+ * change its status or start an attempt meanwhile.
+ */
+export async function findPaymentIntentByIdForMerchantForUpdate(
+  trx: DatabaseTransaction,
+  merchantId: string,
+  id: string,
+): Promise<PaymentIntent | undefined> {
+  const row = await trx
+    .selectFrom('payment_intents')
+    .selectAll()
+    .where('merchant_id', '=', merchantId)
+    .where('id', '=', id)
+    .forUpdate()
+    .executeTakeFirst();
+  return row === undefined ? undefined : toPaymentIntent(row);
+}
+
+/**
+ * Moves an intent of the merchant from one status to another only while it is
+ * still in `from`, and returns it as stored; `undefined` when no row matched.
+ * The caller asks `evaluatePaymentIntentTransition` first.
+ */
+export async function updatePaymentIntentStatusIfCurrent(
+  trx: DatabaseTransaction,
+  change: {
+    readonly merchantId: string;
+    readonly id: string;
+    readonly from: PaymentIntentStatus;
+    readonly to: PaymentIntentStatus;
+    readonly updatedAt: Date;
+  },
+): Promise<PaymentIntent | undefined> {
+  const row = await trx
+    .updateTable('payment_intents')
+    .set({ status: change.to, updated_at: change.updatedAt })
+    .where('merchant_id', '=', change.merchantId)
+    .where('id', '=', change.id)
+    .where('status', '=', change.from)
+    .returningAll()
     .executeTakeFirst();
   return row === undefined ? undefined : toPaymentIntent(row);
 }

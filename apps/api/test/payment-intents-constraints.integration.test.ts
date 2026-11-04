@@ -96,7 +96,7 @@ describe('payment_intents constraints', () => {
     await expect(insert({ currency: 'EUR' })).resolves.toBeDefined();
   });
 
-  it.each(['REQUIRES_ACTION', 'created', 'CANCELED'])(
+  it.each(['REQUIRES_CAPTURE', 'created', 'CANCELED'])(
     'rejects the status %j',
     async (status) => {
       await expectDatabaseError(insert({ status }), {
@@ -106,12 +106,16 @@ describe('payment_intents constraints', () => {
     },
   );
 
-  it.each(['CREATED', 'PROCESSING', 'SUCCEEDED', 'FAILED', 'UNKNOWN'])(
-    'accepts the status %s',
-    async (status) => {
-      await expect(insert({ status })).resolves.toBeDefined();
-    },
-  );
+  it.each([
+    'CREATED',
+    'PROCESSING',
+    'SUCCEEDED',
+    'FAILED',
+    'UNKNOWN',
+    'REQUIRES_ACTION',
+  ])('accepts the status %s', async (status) => {
+    await expect(insert({ status })).resolves.toBeDefined();
+  });
 
   it.each([
     ['empty', ''],
@@ -196,18 +200,21 @@ describe('payment_intents constraints', () => {
   });
 
   it.each([
-    ['a delete', 'delete from payment_intents where id = $1', true],
+    ['a delete', 'delete from payment_intents where id = $1', true, '23001'],
     [
       'a delete that matches no row',
       'delete from payment_intents where false',
       false,
+      '23001',
     ],
-    ['a truncate', 'truncate payment_intents', false],
-  ])('rejects %s', async (_label, statement, withId) => {
+    // The foreign key of payment_attempts makes PostgreSQL refuse a truncate
+    // (feature_not_supported) before the statement trigger runs.
+    ['a truncate', 'truncate payment_intents', false, '0A000'],
+  ])('rejects %s', async (_label, statement, withId, code) => {
     const row = await insert();
     await expectDatabaseError(
       postgres.client.query(statement, withId ? [row.id] : []),
-      { code: '23001' },
+      { code },
     );
   });
 });

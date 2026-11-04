@@ -53,11 +53,14 @@ type TransitionGuard = 'ALWAYS' | 'RETRY_AVAILABLE' | 'ATTEMPTS_EXHAUSTED';
  * record fail to compile, so a new status needs a row here.
  *
  * - Reserve: `CREATED` to `PROCESSING`.
- * - Success: `PROCESSING` or `UNKNOWN` to `SUCCEEDED`.
- * - Timeout or ambiguous outcome: `PROCESSING` to `UNKNOWN`.
- * - Decline or proven non-execution: back to `CREATED` while retries remain,
- *   `FAILED` at the third unsuccessful attempt. From `UNKNOWN` this is the
- *   resolution once non-execution is proven.
+ * - Success: `PROCESSING`, `REQUIRES_ACTION`, or `UNKNOWN` to `SUCCEEDED`.
+ * - Customer action needed, such as 3D Secure: `PROCESSING` to
+ *   `REQUIRES_ACTION`.
+ * - Timeout or ambiguous outcome: `PROCESSING` or `REQUIRES_ACTION` to
+ *   `UNKNOWN`.
+ * - Decline, failed authentication, or proven non-execution: back to `CREATED`
+ *   while retries remain, `FAILED` at the third unsuccessful attempt. From
+ *   `UNKNOWN` this is the resolution once non-execution is proven.
  */
 const TRANSITIONS: Readonly<
   Record<
@@ -67,6 +70,13 @@ const TRANSITIONS: Readonly<
 > = {
   CREATED: { PROCESSING: 'ALWAYS' },
   PROCESSING: {
+    SUCCEEDED: 'ALWAYS',
+    UNKNOWN: 'ALWAYS',
+    REQUIRES_ACTION: 'ALWAYS',
+    CREATED: 'RETRY_AVAILABLE',
+    FAILED: 'ATTEMPTS_EXHAUSTED',
+  },
+  REQUIRES_ACTION: {
     SUCCEEDED: 'ALWAYS',
     UNKNOWN: 'ALWAYS',
     CREATED: 'RETRY_AVAILABLE',

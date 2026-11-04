@@ -3,6 +3,12 @@ import type {
   CredentialValidationResult,
   ProcessorCredentials,
 } from './credentials.js';
+import type {
+  GetTransactionInput,
+  ProcessorTransactionLookup,
+  SaleInput,
+} from './payment-operations.js';
+import type { ProcessorPaymentResult } from './payment-result.js';
 
 /**
  * Provider codes are lower-case identifiers such as `stripe`. The format is
@@ -33,4 +39,21 @@ export interface ProcessorAdapter {
   validateCredentials(
     credentials: ProcessorCredentials,
   ): Promise<CredentialValidationResult>;
+  /**
+   * Authorizes and captures an amount (capability `SALE`). A timeout, a broken
+   * connection, a provider error, or any answer that does not prove the
+   * outcome is `unknown`, never `declined`; only a proven refusal before
+   * execution is `failed_before_execution`. Repeating the call with the same
+   * `operationId` returns the provider's first result instead of charging
+   * again. Errors that are not about the provider, such as a defect, are
+   * thrown.
+   */
+  sale(input: SaleInput): Promise<ProcessorPaymentResult>;
+  /**
+   * Reads the current state of one transaction (capability
+   * `TRANSACTION_LOOKUP`). It changes nothing at the provider.
+   */
+  getTransaction(
+    input: GetTransactionInput,
+  ): Promise<ProcessorTransactionLookup>;
 }

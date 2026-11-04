@@ -20,6 +20,7 @@ import { ListMerchantUsersService } from './application/list-merchant-users.serv
 import { ListMerchantsService } from './application/list-merchants.service.js';
 import { ListProcessorAccountsService } from './application/list-processor-accounts.service.js';
 import { LockMerchantForPaymentService } from './application/lock-merchant-for-payment.service.js';
+import { ProcessorAccountsForPaymentsService } from './application/processor-accounts-for-payments.service.js';
 import { RevokeMerchantApiKeyService } from './application/revoke-merchant-api-key.service.js';
 import { SetDefaultProcessorAccountService } from './application/set-default-processor-account.service.js';
 import { UpdateMerchantProfileService } from './application/update-merchant-profile.service.js';
@@ -57,8 +58,9 @@ import { secretCipherProvider } from './infrastructure/secret-cipher.provider.js
     ListProcessorAccountsService,
     DisableProcessorAccountService,
     SetDefaultProcessorAccountService,
+    ProcessorAccountsForPaymentsService,
     secretCipherProvider,
   ],
-  exports: [LockMerchantForPaymentService],
+  exports: [LockMerchantForPaymentService, ProcessorAccountsForPaymentsService],
 })
 export class MerchantsModule {}

@@ -116,7 +116,13 @@ export interface PaymentIntentsTable {
   amount_minor: ColumnType<bigint, bigint, never>;
   currency: ColumnType<string, string, never>;
   merchant_reference: ColumnType<string, string, never>;
-  status: 'CREATED' | 'PROCESSING' | 'SUCCEEDED' | 'FAILED' | 'UNKNOWN';
+  status:
+    | 'CREATED'
+    | 'PROCESSING'
+    | 'SUCCEEDED'
+    | 'FAILED'
+    | 'UNKNOWN'
+    | 'REQUIRES_ACTION';
   created_at: ColumnType<Date, Date, never>;
   updated_at: Date;
 }
@@ -200,6 +206,47 @@ export type ProcessorAccountRow = Selectable<ProcessorAccountsTable>;
 /** A `processor_accounts` row as inserted. */
 export type NewProcessorAccountRow = Insertable<ProcessorAccountsTable>;
 
+/**
+ * Row of `payment_attempts`, owned by the payments module. The identity
+ * columns cannot be updated, matching the `payment_attempts_restrict_update`
+ * trigger, which also refuses any change of a finished attempt. `status` lists
+ * the values of `payment_attempts_status_check` and `error_category` those of
+ * `payment_attempts_error_category_check`.
+ */
+export interface PaymentAttemptsTable {
+  id: ColumnType<string, string, never>;
+  merchant_id: ColumnType<string, string, never>;
+  payment_intent_id: ColumnType<string, string, never>;
+  processor_account_id: ColumnType<string, string, never>;
+  operation_id: ColumnType<string, string, never>;
+  idempotency_record_id: ColumnType<string, string, never>;
+  status:
+    | 'EXECUTING'
+    | 'REQUIRES_ACTION'
+    | 'SUCCEEDED'
+    | 'DECLINED'
+    | 'FAILED'
+    | 'UNKNOWN';
+  provider_transaction_id: string | null;
+  decline_code: string | null;
+  error_category:
+    | 'CONFIGURATION'
+    | 'NETWORK'
+    | 'GATEWAY'
+    | 'ISSUER_DECLINE'
+    | 'INVALID_REQUEST'
+    | 'UNKNOWN'
+    | null;
+  created_at: ColumnType<Date, Date, never>;
+  updated_at: Date;
+}
+
+/** A `payment_attempts` row as selected, with every column at its read type. */
+export type PaymentAttemptRow = Selectable<PaymentAttemptsTable>;
+
+/** A `payment_attempts` row as inserted. */
+export type NewPaymentAttemptRow = Insertable<PaymentAttemptsTable>;
+
 /** Table types of the database, keyed by table name. */
 export interface DatabaseSchema {
   merchants: MerchantsTable;
@@ -210,6 +257,7 @@ export interface DatabaseSchema {
   users: UsersTable;
   user_sessions: UserSessionsTable;
   processor_accounts: ProcessorAccountsTable;
+  payment_attempts: PaymentAttemptsTable;
 }
 
 /** The Kysely instance that every query and transaction goes through. */
