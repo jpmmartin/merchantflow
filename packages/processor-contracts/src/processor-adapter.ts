@@ -9,6 +9,7 @@ import type {
   SaleInput,
 } from './payment-operations.js';
 import type { ProcessorPaymentResult } from './payment-result.js';
+import type { ProcessorRefundResult, RefundInput } from './refund.js';
 
 /**
  * Provider codes are lower-case identifiers such as `stripe`. The format is
@@ -56,4 +57,14 @@ export interface ProcessorAdapter {
   getTransaction(
     input: GetTransactionInput,
   ): Promise<ProcessorTransactionLookup>;
+  /**
+   * Refunds part or all of a captured payment (capability `REFUND`, and
+   * `PARTIAL_REFUND` for less than the captured amount). A timeout, a broken
+   * connection, a provider error, or any answer that does not prove the
+   * outcome is `unknown`, never `failed`; only a proven refusal or failure is
+   * `failed`. Repeating the call with the same `operationId` returns the
+   * provider's first result instead of refunding again. Errors that are not
+   * about the provider, such as a defect, are thrown.
+   */
+  refund(input: RefundInput): Promise<ProcessorRefundResult>;
 }

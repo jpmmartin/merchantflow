@@ -83,7 +83,7 @@ export type ConfirmPaymentIntentFailureCode =
   | 'PAYMENT_OUTCOME_UNKNOWN'
   /** An attempt of the intent is executing or waits for the customer. */
   | 'ATTEMPT_IN_PROGRESS'
-  /** The intent is `SUCCEEDED` or `FAILED`. Nothing was stored. */
+  /** The intent is in a final status. Nothing was stored. */
   | 'INTENT_NOT_CONFIRMABLE'
   /** The account is not the merchant's. Nothing was stored. */
   | 'PROCESSOR_ACCOUNT_NOT_FOUND'
@@ -155,6 +155,8 @@ function statusRefusal(
       return 'ATTEMPT_IN_PROGRESS';
     case 'SUCCEEDED':
     case 'FAILED':
+    case 'PARTIALLY_REFUNDED':
+    case 'REFUNDED':
       return 'INTENT_NOT_CONFIRMABLE';
   }
 }

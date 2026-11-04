@@ -28,6 +28,15 @@ export {
   type ProcessorPaymentStatus,
 } from './payment-result.js';
 export {
+  PROCESSOR_REFUND_STATUSES,
+  matchRefundResult,
+  type ProcessorRefundReferences,
+  type ProcessorRefundResult,
+  type ProcessorRefundResultHandlers,
+  type ProcessorRefundStatus,
+  type RefundInput,
+} from './refund.js';
+export {
   PROVIDER_CODE_PATTERN,
   isProviderCode,
   type ProcessorAdapter,

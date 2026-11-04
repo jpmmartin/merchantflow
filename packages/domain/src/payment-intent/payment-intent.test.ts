@@ -15,10 +15,12 @@ describe('PAYMENT_INTENT_STATUSES', () => {
       'FAILED',
       'UNKNOWN',
       'REQUIRES_ACTION',
+      'PARTIALLY_REFUNDED',
+      'REFUNDED',
     ]);
   });
 
-  it.each(['REQUIRES_CAPTURE', 'CANCELED', 'PARTIALLY_REFUNDED', 'REFUNDED'])(
+  it.each(['REQUIRES_CAPTURE', 'CANCELED'])(
     'does not include the later status %s',
     (status) => {
       expect(PAYMENT_INTENT_STATUSES).not.toContain(status);

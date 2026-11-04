@@ -387,6 +387,30 @@ export const TENANT_ROUTES: readonly TenantRoute[] = [
     platformExisting: 403,
     platformMissing: 403,
   },
+  {
+    // Another merchant's intent is 404 before the role, the key, the status,
+    // or the account is read, and the tenant intents are CREATED, so no
+    // request of the suite reaches a provider. The platform key is refused by
+    // the guard for every id.
+    kind: 'resource',
+    route: 'POST /payment-intents/:id/refunds',
+    request: (r) => ({
+      path: `/payment-intents/${r.paymentIntentId}/refunds`,
+      body: { amount_minor: '100' },
+      headers: { 'Idempotency-Key': `tenant-${randomUUID()}` },
+    }),
+    platformExisting: 403,
+    platformMissing: 403,
+  },
+  {
+    kind: 'resource',
+    route: 'GET /payment-intents/:id/refunds',
+    request: (r) => ({
+      path: `/payment-intents/${r.paymentIntentId}/refunds`,
+    }),
+    platformExisting: 403,
+    platformMissing: 403,
+  },
 ];
 
 /** The method and path of an entry, split. */

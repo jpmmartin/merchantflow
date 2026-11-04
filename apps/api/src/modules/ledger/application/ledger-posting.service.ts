@@ -2,8 +2,11 @@ import { randomUUID } from 'node:crypto';
 import type { DatabaseTransaction } from '@merchantflow/database';
 import {
   ledgerAccountDefinition,
+  refundPostingLines,
   salePostingLines,
+  type BalancedJournalLines,
   type JournalEntryFailure,
+  type JournalEntryValidationResult,
   type PositiveMoney,
 } from '@merchantflow/domain';
 import { Inject, Injectable } from '@nestjs/common';
@@ -13,7 +16,7 @@ import {
   findJournalEntryIdBySource,
   insertJournalEntry,
 } from '../infrastructure/ledger-queries.js';
-import type { JournalEntry, JournalLine } from './ledger.js';
+import type { JournalEntry, JournalLine, JournalSourceType } from './ledger.js';
 
 export interface PostPaymentSaleCommand {
   /** The merchant of the payment, from the payment's own row. */
@@ -22,6 +25,18 @@ export interface PostPaymentSaleCommand {
   /** The successful attempt: the source of the entry, posted at most once. */
   readonly paymentAttemptId: string;
   /** The captured amount, gross of processor fees. */
+  readonly amount: PositiveMoney;
+  /** The merchant's order reference, for the entry's description. */
+  readonly merchantReference: string;
+}
+
+export interface PostPaymentRefundCommand {
+  /** The merchant of the refund, from the refund's own row. */
+  readonly merchantId: string;
+  readonly paymentIntentId: string;
+  /** The successful refund: the source of the entry, posted at most once. */
+  readonly refundId: string;
+  /** The refunded amount, in the payment's currency. */
   readonly amount: PositiveMoney;
   /** The merchant's order reference, for the entry's description. */
   readonly merchantReference: string;
@@ -56,6 +71,10 @@ export type PostMissingPaymentSaleResult =
  * attempt (`PAYMENT_SALE`, attempt ID), and the unique source constraint
  * makes a second posting of the same attempt fail, which rolls the caller's
  * transaction back; the deferred trigger checks the balance at commit.
+ *
+ * A successful refund is posted by `refundPostingLines`: debit Refunds
+ * (contra-revenue), credit Processor receivable, by the refunded amount, with
+ * the refund as its source (`PAYMENT_REFUND`, refund ID).
  */
 @Injectable()
 export class LedgerPostingService {
@@ -65,21 +84,72 @@ export class LedgerPostingService {
     trx: DatabaseTransaction,
     command: PostPaymentSaleCommand,
   ): Promise<PostPaymentSaleResult> {
-    const rule = salePostingLines(command.amount);
+    return this.post(trx, salePostingLines(command.amount), {
+      merchantId: command.merchantId,
+      sourceType: 'PAYMENT_SALE',
+      sourceId: command.paymentAttemptId,
+      paymentIntentId: command.paymentIntentId,
+      description: `Card sale, order ${command.merchantReference}`,
+    });
+  }
+
+  /**
+   * Posts a successful refund inside the caller's transaction. The unique
+   * source makes a second posting of the same refund fail.
+   */
+  async postPaymentRefund(
+    trx: DatabaseTransaction,
+    command: PostPaymentRefundCommand,
+  ): Promise<PostPaymentSaleResult> {
+    return this.post(trx, refundPostingLines(command.amount), {
+      merchantId: command.merchantId,
+      sourceType: 'PAYMENT_REFUND',
+      sourceId: command.refundId,
+      paymentIntentId: command.paymentIntentId,
+      description: `Card refund, order ${command.merchantReference}`,
+    });
+  }
+
+  /** Writes the entry of a posting rule's lines, creating accounts on need. */
+  private async post(
+    trx: DatabaseTransaction,
+    rule: JournalEntryValidationResult,
+    source: {
+      readonly merchantId: string;
+      readonly sourceType: JournalSourceType;
+      readonly sourceId: string;
+      readonly paymentIntentId: string;
+      readonly description: string;
+    },
+  ): Promise<PostPaymentSaleResult> {
     if (!rule.ok) {
       return { ok: false, code: 'INVALID_ENTRY', reason: rule.code };
     }
+    return { ok: true, entry: await this.write(trx, rule.entry, source) };
+  }
+
+  private async write(
+    trx: DatabaseTransaction,
+    balanced: BalancedJournalLines,
+    source: {
+      readonly merchantId: string;
+      readonly sourceType: JournalSourceType;
+      readonly sourceId: string;
+      readonly paymentIntentId: string;
+      readonly description: string;
+    },
+  ): Promise<JournalEntry> {
     const now = this.clock.now();
     const lines: JournalLine[] = [];
-    for (const [index, line] of rule.entry.lines.entries()) {
+    for (const [index, line] of balanced.lines.entries()) {
       const definition = ledgerAccountDefinition(line.accountCode);
       const account = await ensureLedgerAccount(trx, {
         id: randomUUID(),
-        merchantId: command.merchantId,
+        merchantId: source.merchantId,
         code: line.accountCode,
         name: definition.name,
         classification: definition.classification,
-        currency: rule.entry.currency,
+        currency: balanced.currency,
         createdAt: now,
       });
       if (account.classification !== definition.classification) {
@@ -98,11 +168,11 @@ export class LedgerPostingService {
     }
     const entry: JournalEntry = {
       id: randomUUID(),
-      merchantId: command.merchantId,
-      sourceType: 'PAYMENT_SALE',
-      sourceId: command.paymentAttemptId,
-      paymentIntentId: command.paymentIntentId,
-      description: `Card sale, order ${command.merchantReference}`,
+      merchantId: source.merchantId,
+      sourceType: source.sourceType,
+      sourceId: source.sourceId,
+      paymentIntentId: source.paymentIntentId,
+      description: source.description,
       postedAt: now,
       lines,
     };
@@ -115,7 +185,7 @@ export class LedgerPostingService {
         amount: line.amount,
       })),
     });
-    return { ok: true, entry };
+    return entry;
   }
 
   /**

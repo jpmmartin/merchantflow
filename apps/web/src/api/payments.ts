@@ -158,3 +158,72 @@ export async function listPaymentAttempts(
     `/payment-intents/${encodeURIComponent(id)}/attempts`,
   )) as PaymentAttemptList;
 }
+
+/** Statuses of a refund, as the API returns them. */
+export type RefundStatus =
+  'EXECUTING' | 'PENDING' | 'SUCCEEDED' | 'FAILED' | 'UNKNOWN';
+
+/** One refund of a captured intent; `amount_minor` is an integer string. */
+export interface Refund {
+  readonly id: string;
+  readonly payment_intent_id: string;
+  readonly merchant_id: string;
+  readonly payment_attempt_id: string;
+  readonly processor_account_id: string;
+  readonly amount_minor: string;
+  readonly currency: string;
+  readonly status: RefundStatus;
+  readonly provider_refund_id: string | null;
+  readonly failure_code: string | null;
+  readonly error_category: string | null;
+  readonly created_at: string;
+  readonly updated_at: string;
+}
+
+/** The refunds of one intent with its refund amounts, all integer strings. */
+export interface RefundList {
+  readonly payment_intent_id: string;
+  readonly merchant_id: string;
+  readonly currency: string;
+  readonly captured_amount_minor: string;
+  readonly refunded_amount_minor: string;
+  readonly pending_amount_minor: string;
+  readonly refundable_amount_minor: string;
+  readonly data: readonly Refund[];
+}
+
+/** The answer of a refund request. */
+export interface RefundCreation {
+  readonly refund: Refund;
+  readonly payment_intent: PaymentIntent & {
+    readonly refunded_amount_minor: string;
+    readonly refundable_amount_minor: string;
+  };
+}
+
+/**
+ * Refunds `amount_minor` of an intent under `idempotencyKey`. Sending the same
+ * amount with the same key again returns the stored answer instead of a
+ * second refund.
+ */
+export async function createRefund(
+  id: string,
+  amountMinor: string,
+  idempotencyKey: string,
+): Promise<RefundCreation> {
+  return (await apiRequest(
+    'POST',
+    `/payment-intents/${encodeURIComponent(id)}/refunds`,
+    {
+      body: { amount_minor: amountMinor },
+      headers: { 'Idempotency-Key': idempotencyKey },
+    },
+  )) as RefundCreation;
+}
+
+export async function listRefunds(id: string): Promise<RefundList> {
+  return (await apiRequest(
+    'GET',
+    `/payment-intents/${encodeURIComponent(id)}/refunds`,
+  )) as RefundList;
+}

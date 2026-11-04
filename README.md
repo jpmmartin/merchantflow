@@ -14,7 +14,7 @@ Today the repository contains the runnable foundation only:
 - structured JSON logs with a correlation ID on every request;
 - one error format for every failure, with a stable `code`, a safe message, and the correlation ID, plus request validation with Zod and an OpenAPI document served outside production (see API conventions);
 - a forward-only SQL migration runner (`pnpm db:migrate`);
-- database tables for merchants, API keys, users, user sessions, processor accounts, an append-only audit trail, idempotency records, payment intents, and payment attempts, with the constraints enforced by PostgreSQL itself;
+- database tables for merchants, API keys, users, user sessions, processor accounts, an append-only audit trail, idempotency records, payment intents, payment attempts, refunds, and a ledger, with the constraints enforced by PostgreSQL itself;
 - API keys: 256 bits of randomness, only a lookup identifier and a SHA-256 hash stored, and an audit event for each issuance and revocation;
 - request authentication: a global guard checks the `Authorization: Bearer <token>` header, an API key or a user session token, against the stored hash on every request, with deny-by-default routing and role checks (see Authentication);
 - user sign-in: `POST /api/v1/auth/login` with an email and a password (scrypt hashes only), `POST /api/v1/auth/logout`, and `GET /api/v1/auth/me`;
@@ -22,12 +22,13 @@ Today the repository contains the runnable foundation only:
 - payment intent creation, `POST /api/v1/payment-intents`, with a required `Idempotency-Key` and protection against a second intent for the same merchant order (see Payment intents); nothing is charged;
 - payment intent retrieval, `GET /api/v1/payment-intents/{id}`, and listing, `GET /api/v1/payment-intents`, newest first with stable pagination and a status filter, both scoped to the merchant of the key (see Payment intents);
 - payment confirmation through Stripe in test mode, `POST /api/v1/payment-intents/{id}/confirm`, with a required `Idempotency-Key`, the merchant's default Stripe account, and no database transaction open during the Stripe call; 3D Secure completion, `POST /api/v1/payment-intents/{id}/complete-action`; and the attempt history, `GET /api/v1/payment-intents/{id}/attempts` (see Confirming a payment intent);
-- a double-entry merchant ledger: each successful payment posts one balanced, immutable journal entry in the same transaction that records the success, and `GET /api/v1/merchants/{id}/ledger/balances`, `.../ledger/journal-entries`, and `.../ledger/journal-entries/{journalEntryId}` read the accounts with their balances and the entries (see Ledger);
+- refunds through Stripe in test mode, full or partial, `POST /api/v1/payment-intents/{id}/refunds` with a required `Idempotency-Key`, through the Stripe account that captured the payment, and the refund list, `GET /api/v1/payment-intents/{id}/refunds` (see Refunding a payment intent);
+- a double-entry merchant ledger: each successful payment and each successful refund posts one balanced, immutable journal entry in the same transaction that records the success, and `GET /api/v1/merchants/{id}/ledger/balances`, `.../ledger/journal-entries`, and `.../ledger/journal-entries/{journalEntryId}` read the accounts with their balances and the entries (see Ledger);
 - a development seed, `pnpm db:seed`, that creates the first platform administrator key and the platform administrator user (see Demonstration: two merchants, neither sees the other, and Web frontend);
 - linting, formatting, type checking, unit tests, and integration tests against a real PostgreSQL started with Testcontainers, including an HTTP concurrency suite (`tests/concurrency`) that sends 50 simultaneous requests to the listening API and checks that duplicates create one intent;
 - a GitHub Actions workflow that runs the same checks.
 
-Recovery of payments with an unknown outcome, the simulated processor, processor fees, settlements and payouts in the ledger, refunds, capture and void, Stripe webhooks, and every other business capability are planned and do not exist yet.
+Recovery of payments with an unknown outcome, the simulated processor, processor fees, settlements and payouts in the ledger, capture and void, the resolution of pending refunds, Stripe webhooks, and every other business capability are planned and do not exist yet.
 
 ## Prerequisites
 
@@ -266,7 +267,7 @@ curl -sS -w '\nHTTP %{http_code}\n' 'http://127.0.0.1:3000/api/v1/payment-intent
 
 - The intents are ordered newest first, by creation time and then id. Each item has the same body as `GET /api/v1/payment-intents/{id}`.
 - `limit` is 1 to 100 (default 20). Pass `next_cursor` back unchanged as `cursor`, with the same `status`; it is `null` on the last page. An invalid cursor is a `400`. A walk over the pages never repeats an intent, and never skips one that existed when it began.
-- `status` keeps only the intents in that status: `CREATED`, `PROCESSING`, `REQUIRES_ACTION`, `SUCCEEDED`, `FAILED`, or `UNKNOWN` (the OpenAPI document lists them). Any other value, a lower-case one included, is a `400 VALIDATION_FAILED`.
+- `status` keeps only the intents in that status: `CREATED`, `PROCESSING`, `REQUIRES_ACTION`, `SUCCEEDED`, `FAILED`, `UNKNOWN`, `PARTIALLY_REFUNDED`, or `REFUNDED` (the OpenAPI document lists them). Any other value, a lower-case one included, is a `400 VALIDATION_FAILED`.
 - The merchant always comes from the key: a `merchant_id` or any other unknown query parameter is a `400`, and a header naming another merchant is ignored. A `PLATFORM_ADMIN` key or user gets `403 INSUFFICIENT_ROLE`. A `DRAFT` or `SUSPENDED` merchant can still list its intents. A list writes no audit event.
 
 ### Confirming a payment intent
@@ -308,6 +309,31 @@ After Stripe.js `handleNextAction` ran the challenge in the browser, `POST /api/
 
 To find a payment in Stripe, open the Dashboard of the merchant's sandbox, go to **Payments** (test mode), and search for the attempt's `pi_` ID; its metadata holds the MerchantFlow IDs.
 
+### Refunding a payment intent
+
+`POST /api/v1/payment-intents/{id}/refunds` needs a `MERCHANT_ADMIN` key or user of an `ACTIVE` merchant and an `Idempotency-Key` header. The body is `{"amount_minor": "<integer string>"}` in minor units of the intent's currency, parsed like `amount_minor` at creation (never as a JSON number). Only a `SUCCEEDED` or `PARTIALLY_REFUNDED` intent can be refunded (`409 PAYMENT_INTENT_NOT_REFUNDABLE` otherwise).
+
+```bash
+curl -sS -w '\nHTTP %{http_code}\n' -X POST http://127.0.0.1:3000/api/v1/payment-intents/$INTENT_ID/refunds \
+  -H "Authorization: Bearer $KEY_A" -H 'Content-Type: application/json' \
+  -H 'Idempotency-Key: order-1001-refund-1' -d '{"amount_minor":"500"}'
+```
+
+- **Refundable amount:** the captured amount minus every refund that succeeded or is still executing, pending, or unknown. A larger amount is `409 REFUND_AMOUNT_EXCEEDS_REFUNDABLE`, decided before Stripe is called. Each refund locks the intent's row while it checks and reserves its amount, so concurrent refunds can never add up to more than the captured amount, and PostgreSQL refuses such a row too.
+- **Account:** the refund goes through the Stripe account of the payment's successful attempt, even if that account is no longer the default or is disabled.
+- **Stripe call:** `POST /v1/refunds` with the PaymentIntent and the amount, with no database transaction open, the refund's operation ID as Stripe's idempotency key, and the merchant, intent, and refund IDs as metadata.
+
+| Stripe outcome | Answer | Refund | Intent | Ledger | Stored under the key |
+| -------------- | ------ | ------ | ------ | ------ | -------------------- |
+| Succeeded | `201` | `SUCCEEDED` | `PARTIALLY_REFUNDED`, or `REFUNDED` once the refunds add up to the captured amount | One entry: debit `4100` Refunds, credit `1100` | Yes |
+| Pending | `201` | `PENDING`; its amount stays reserved | Unchanged | Nothing | Yes |
+| Failed | `201` | `FAILED`; its amount is released | Unchanged | Nothing | Yes |
+| Timeout or ambiguous answer | `202` | `UNKNOWN`; its amount stays reserved | Unchanged | Nothing | No: the key gets `409 OPERATION_IN_PROGRESS`, and no new refund of the intent is accepted (`409 REFUND_OUTCOME_UNKNOWN`) |
+
+The answer is `{"refund": {...}, "payment_intent": {...}}`: the refund (`id`, `payment_attempt_id`, `processor_account_id`, `amount_minor`, `currency`, `status`, `provider_refund_id` such as Stripe's `re_` ID, `failure_code`, `error_category`, times) and the intent with `refunded_amount_minor` and `refundable_amount_minor`. The same key with the same request returns the stored answer byte for byte and never sends a second refund; the same key with another amount is `409 IDEMPOTENCY_KEY_REUSED`; a refused request stores nothing. Each applied refund writes one `PAYMENT_REFUND_APPLIED` audit event.
+
+`GET /api/v1/payment-intents/{id}/refunds` (`MERCHANT_ADMIN` and `MERCHANT_READ_ONLY`) returns the intent's `captured_amount_minor`, `refunded_amount_minor`, `pending_amount_minor`, and `refundable_amount_minor` as integer strings, and its refunds oldest first in `data`. Another merchant's intent is `404` on both routes. In Stripe, the refunds appear on the payment's page in the Dashboard.
+
 ## Ledger
 
 Each merchant has a double-entry payments ledger. It records the merchant's side of its own Stripe account: the funds go from Stripe to the merchant, and MerchantFlow never holds them or owes them.
@@ -318,10 +344,13 @@ Each merchant has a double-entry payments ledger. It records the merchant's side
 | ------ | -------------------- | -------------- | ----------- | -------------------------------------------------------------------- |
 | `1100` | Processor receivable | `ASSET`        | `DEBIT`     | What the merchant's processor account owes it for captured sales     |
 | `4000` | Sales                | `REVENUE`      | `CREDIT`    | Gross amount of the merchant's captured card sales                   |
+| `4100` | Refunds              | `CONTRA_REVENUE` | `DEBIT`   | Captured sales returned to customers; it reduces Sales               |
 
 **Posting.** A payment that reaches `SUCCEEDED`, through confirm or through 3D Secure completion, posts one entry in the same database transaction: debit `1100`, credit `4000`, by the payment's amount, gross of processor fees. Its source is `PAYMENT_SALE` with the successful attempt's ID, which is unique, so the same success can never post twice. A decline, a failure, `REQUIRES_ACTION`, and `UNKNOWN` post nothing, and a failed posting rolls the payment's state change back too. Each `PAYMENT_INTENT_CONFIRMED` or `PAYMENT_INTENT_ACTION_COMPLETED` audit event names its `journal_entry_id` (`null` when nothing was posted).
 
-**Not recorded yet:** processor fees (Stripe reports them later), Stripe settlements and payouts to the merchant's bank, refunds, and disputes.
+**Refund posting.** A refund that Stripe reports as succeeded posts one entry in the transaction that records it: debit `4100` Refunds, credit `1100` Processor receivable, by the refunded amount. Its source is `PAYMENT_REFUND` with the refund's ID, so a refund can never post twice; a pending, failed, or unknown refund posts nothing.
+
+**Not recorded yet:** processor fees (Stripe reports them later), Stripe settlements and payouts to the merchant's bank, refunds that Stripe completes or fails later (no webhook yet), and disputes.
 
 **Payments that succeeded before the ledger existed** have no entry until you run:
 
@@ -458,6 +487,8 @@ Alternatively, `docker compose down --volumes` followed by the Quick start gives
   - the order's page (`/payments/{id}`), with every field, the formatted amount, the status as a badge, and the attempt history (account, status, Stripe `pi_` ID, decline code, error category, times). Another merchant's order, or an unknown id, shows the API's `404`;
   - on a `CREATED` order, for `MERCHANT_ADMIN`, **Pay with a card**: Stripe's card field (Stripe Elements) loaded with the publishable key of the merchant's enabled default account, a list of Stripe test cards, and **Pay**. Stripe.js turns the card into a payment method in the browser and only its `pm_` ID reaches the API. 3D Secure opens Stripe's challenge in the page and the result is applied right after. The page then shows the outcome: success, a decline with its code and "try another card", or an unknown outcome with a warning not to pay again. Without an enabled default account the section links to the merchant's processor accounts;
   - on a `REQUIRES_ACTION` order, **Continue authentication** opens the 3D Secure challenge again, for example after a reload;
+  - on a `SUCCEEDED` or `PARTIALLY_REFUNDED` order, for `MERCHANT_ADMIN`, **Refund**: the amount is typed in major units and defaults to the remaining refundable amount (a full refund; **Full remaining** restores it), and a smaller amount is a partial refund. One `Idempotency-Key` per refund: after a network error, `OPERATION_IN_PROGRESS`, a `503`, or a server error, **Send the same refund again** reuses it; any other answer or a different amount starts a new one. The outcome (succeeded, pending, failed, unknown) and errors with their code and correlation ID are shown;
+  - on every order's page, its **Refunds**: the captured, refunded, pending, and remaining amounts, and a table with each refund's amount, status, Stripe `re_` ID, account, failure, and times;
   - on every order's page, its **Journal entries** with their debit and credit lines;
 - a **Ledger** page per merchant (`/merchants/{id}/ledger`): for a merchant user under **Ledger** in the navigation bar, for the platform administrator through the **Ledger** button of each merchant's page. It shows the accounts with code, name, classification, normal side, currency, debit and credit totals, and balance, and the journal entries newest first with **Load more**.
 
@@ -560,8 +591,8 @@ Keep it: losing it makes every stored secret key unreadable, and the accounts mu
 - No rate limit or input size limit beyond the parser's default exists yet, sign-in included. There is no password reset, email verification, or multi-factor authentication.
 - Every merchant user is `MERCHANT_ADMIN`; there is no role choice, re-enabling, password change, or deletion of users yet, and the lists of a merchant's users and keys are not paginated. Platform users are created only by the seed. Only payment intent creation and confirmation take an idempotency key: creating a merchant twice creates two merchants.
 - **A payment whose outcome is unknown stays blocked.** Automatic recovery does not exist yet: a crash of the API while it waits for Stripe, a failure to record Stripe's answer, or an `UNKNOWN` result (a timeout, a connection error, a Stripe server error) leaves the attempt `EXECUTING` or `UNKNOWN` and the intent `PROCESSING` or `UNKNOWN`, and no new attempt is accepted for it until recovery exists. Check such a payment in the Stripe Dashboard by its metadata. A payment left in `REQUIRES_ACTION` also blocks new attempts until the customer completes or fails the challenge.
-- Payments use Stripe in test mode and cards only, with automatic capture; there is no refund, manual capture, void, or webhook yet. The ledger records only captured sales: no processor fee, settlement, payout, or refund, and a payment that succeeded before the ledger existed has no entry until `pnpm db:backfill-ledger` runs. Its tables reject changes through triggers that a database superuser or the table owner can still disable. Stripe's PaymentIntent amount limit (99,999,999 minor units) is refused before any call, as a `FAILED` attempt.
-- Idempotency records are kept and never deleted (no purge exists). `payment_intents` and `payment_attempts` reject deletes, and changes of an intent's amount, currency, reference, or merchant or of a finished attempt, through triggers that a database superuser or the table owner can still disable.
+- Payments use Stripe in test mode and cards only, with automatic capture; there is no manual capture, void, or webhook yet. A refund that Stripe leaves `pending` stays `PENDING` with its amount reserved, and a refund whose outcome is unknown stays `UNKNOWN` and blocks new refunds of its payment, until webhooks or recovery exist; a refund that Stripe first reports as succeeded and fails later is not learned. The ledger records captured sales and successful refunds: no processor fee, settlement, or payout, and a payment that succeeded before the ledger existed has no entry until `pnpm db:backfill-ledger` runs. Its tables reject changes through triggers that a database superuser or the table owner can still disable. Stripe's PaymentIntent amount limit (99,999,999 minor units) is refused before any call, as a `FAILED` attempt.
+- Idempotency records are kept and never deleted (no purge exists). `payment_intents`, `payment_attempts`, and `refunds` reject deletes, and changes of an intent's amount, currency, reference, or merchant, of a finished attempt, or of a finished refund, through triggers that a database superuser or the table owner can still disable.
 - The other business endpoints are the merchant endpoints: no platform key can be issued through the API; the development seed is the only way to create one, and a lost platform key is replaced by revoking it in the database (see Recover a lost platform key). The simulated processor and dashboard are planned.
 - The error responses of the health endpoints and of the unknown-route handler are not described in the OpenAPI document.
 - A merchant or payment intent created by a transaction that commits late can be missed by a list walk already past its position; the next walk shows it.

@@ -1,5 +1,6 @@
 import type {
   ProcessorPaymentResult,
+  ProcessorRefundResult,
   ProcessorTransactionLookup,
 } from '@merchantflow/processor-contracts';
 import Stripe from 'stripe';
@@ -178,6 +179,131 @@ export function lookupErrorResult(error: unknown): ProcessorTransactionLookup {
   }
   if (error instanceof Stripe.errors.StripeError) {
     return { outcome: 'unavailable', category: 'UNKNOWN' };
+  }
+  throw error;
+}
+
+/** What a refund response must match: the PaymentIntent and the amount sent. */
+export interface ExpectedRefund {
+  readonly paymentIntentId: string;
+  readonly amount: number;
+  readonly currency: string;
+}
+
+const REFUND_UNKNOWN = { status: 'unknown', category: 'UNKNOWN' } as const;
+
+/**
+ * Normalizes a Refund that Stripe returned for `refunds.create` with the
+ * PaymentIntent expanded. The Refund object carries no `livemode`, so the
+ * mode is read from the expanded PaymentIntent: a PaymentIntent in live mode,
+ * or one that is not expanded, is `unknown` (the refund may have moved real
+ * money, or the mode cannot be proven). A refund of another PaymentIntent,
+ * another amount, or another currency than the one sent, or without an ID,
+ * is `unknown` too. Then, by Stripe's refund status:
+ *
+ * - `succeeded` → `succeeded`;
+ * - `pending`, and `requires_action` (Stripe waits for the customer's
+ *   instructions; not used by cards) → `pending`: the refund exists and has
+ *   not finished;
+ * - `failed` → `failed` with category `ISSUER_DECLINE` and Stripe's
+ *   `failure_reason`; `canceled` → `failed` with category `UNKNOWN` and the
+ *   code `canceled`: in both cases no money was returned;
+ * - any other status, or none → `unknown`.
+ */
+export function refundResult(
+  refund: Stripe.Refund,
+  expected: ExpectedRefund,
+): ProcessorRefundResult {
+  const providerRefundId = stripeIdOf(refund.id);
+  const intent = refund.payment_intent;
+  if (intent === null || typeof intent === 'string') {
+    return { ...REFUND_UNKNOWN, providerRefundId };
+  }
+  if (intent.livemode) {
+    return { status: 'unknown', category: 'CONFIGURATION', providerRefundId };
+  }
+  if (
+    providerRefundId === null ||
+    intent.id !== expected.paymentIntentId ||
+    refund.amount !== expected.amount ||
+    refund.currency !== expected.currency
+  ) {
+    return { ...REFUND_UNKNOWN, providerRefundId };
+  }
+  switch (refund.status) {
+    case 'succeeded':
+      return { status: 'succeeded', providerRefundId };
+    case 'pending':
+    case 'requires_action':
+      return { status: 'pending', providerRefundId };
+    case 'failed':
+      return {
+        status: 'failed',
+        providerRefundId,
+        category: 'ISSUER_DECLINE',
+        failureCode: declineCodeOf(refund.failure_reason),
+      };
+    case 'canceled':
+      return {
+        status: 'failed',
+        providerRefundId,
+        category: 'UNKNOWN',
+        failureCode: 'canceled',
+      };
+    default:
+      return { ...REFUND_UNKNOWN, providerRefundId };
+  }
+}
+
+/**
+ * Normalizes an error of `refunds.create` by its class, never by its message:
+ *
+ * - an authentication or permission error (401, 403) is `failed` with the
+ *   category `CONFIGURATION`, and an invalid request (400, 404; for example an
+ *   amount above what Stripe can still refund, or a PaymentIntent already
+ *   refunded) is `failed` with `INVALID_REQUEST`: Stripe refused the request
+ *   and created no refund;
+ * - a broken connection or timeout, a server error, a conflict, a rate limit,
+ *   an idempotency error, a card error (not documented for refunds), and any
+ *   other Stripe error are `unknown`: the request, or a retry of it, may have
+ *   been executed.
+ *
+ * An error that is not a Stripe error is a defect and is thrown again.
+ */
+export function refundErrorResult(error: unknown): ProcessorRefundResult {
+  if (
+    error instanceof Stripe.errors.StripeAuthenticationError ||
+    error instanceof Stripe.errors.StripePermissionError
+  ) {
+    return {
+      status: 'failed',
+      providerRefundId: null,
+      category: 'CONFIGURATION',
+      failureCode: null,
+    };
+  }
+  if (error instanceof Stripe.errors.StripeIdempotencyError) {
+    return { ...REFUND_UNKNOWN, providerRefundId: null };
+  }
+  if (error instanceof Stripe.errors.StripeInvalidRequestError) {
+    return {
+      status: 'failed',
+      providerRefundId: null,
+      category: 'INVALID_REQUEST',
+      failureCode: declineCodeOf(error.code),
+    };
+  }
+  if (error instanceof Stripe.errors.StripeConnectionError) {
+    return { status: 'unknown', category: 'NETWORK', providerRefundId: null };
+  }
+  if (
+    error instanceof Stripe.errors.StripeAPIError ||
+    error instanceof Stripe.errors.StripeRateLimitError
+  ) {
+    return { status: 'unknown', category: 'GATEWAY', providerRefundId: null };
+  }
+  if (error instanceof Stripe.errors.StripeError) {
+    return { ...REFUND_UNKNOWN, providerRefundId: null };
   }
   throw error;
 }

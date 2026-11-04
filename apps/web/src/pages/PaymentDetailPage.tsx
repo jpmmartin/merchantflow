@@ -6,8 +6,10 @@ import { listProcessorAccounts, type ProcessorAccount } from '../api/merchants';
 import {
   getPaymentIntent,
   listPaymentAttempts,
+  listRefunds,
   type PaymentAttempt,
   type PaymentIntent,
+  type RefundList,
 } from '../api/payments';
 import { ErrorAlert } from '../components/ErrorAlert';
 import { formatTime } from '../components/format';
@@ -20,6 +22,11 @@ import {
 import { formatAmountMinor } from '../money/amount';
 import { PaymentActionSection } from './PaymentActionSection';
 import {
+  PaymentRefundSection,
+  RefundAmounts,
+  RefundsTable,
+} from './PaymentRefundSection';
+import {
   PaymentPaySection,
   type PaymentStepOutcome,
 } from './PaymentPaySection';
@@ -31,10 +38,11 @@ type DetailState =
 
 /**
  * One payment order, by the id in the URL, with every field the API returns,
- * its attempt history, its journal entries, and for `MERCHANT_ADMIN` the pay section of a
- * `CREATED` order or the authentication step of a `REQUIRES_ACTION` one. An
- * order of another merchant and an unknown id both show the API's
- * `NOT_FOUND`.
+ * its attempt history, its refunds with the refunded and remaining amounts,
+ * its journal entries, and for `MERCHANT_ADMIN` the pay section of a
+ * `CREATED` order, the authentication step of a `REQUIRES_ACTION` one, or the
+ * refund form of a `SUCCEEDED` or `PARTIALLY_REFUNDED` one. An order of
+ * another merchant and an unknown id both show the API's `NOT_FOUND`.
  */
 export function PaymentDetailPage({
   principal,
@@ -59,6 +67,8 @@ export function PaymentDetailPage({
     undefined,
   );
   const [entriesError, setEntriesError] = useState<unknown>(undefined);
+  const [refunds, setRefunds] = useState<RefundList | undefined>(undefined);
+  const [refundsError, setRefundsError] = useState<unknown>(undefined);
 
   const reloadEntries = useCallback(async () => {
     if (merchantId === null) return;
@@ -71,8 +81,18 @@ export function PaymentDetailPage({
     }
   }, [merchantId, paymentIntentId]);
 
+  const reloadRefunds = useCallback(async () => {
+    try {
+      setRefunds(await listRefunds(paymentIntentId));
+      setRefundsError(undefined);
+    } catch (caught) {
+      setRefundsError(caught);
+    }
+  }, [paymentIntentId]);
+
   const reload = useCallback(async () => {
     void reloadEntries();
+    void reloadRefunds();
     try {
       const [intent, list] = await Promise.all([
         getPaymentIntent(paymentIntentId),
@@ -89,12 +109,13 @@ export function PaymentDetailPage({
           : { kind: 'failed', error: caught },
       );
     }
-  }, [paymentIntentId, reloadEntries]);
+  }, [paymentIntentId, reloadEntries, reloadRefunds]);
 
   useEffect(() => {
     setState({ kind: 'loading' });
     setAttempts(undefined);
     setEntries(undefined);
+    setRefunds(undefined);
     setOutcome(undefined);
     void reload();
   }, [reload]);
@@ -157,13 +178,35 @@ export function PaymentDetailPage({
             accounts={accounts}
             error={attemptsError}
           />
+          {admin &&
+          refunds !== undefined &&
+          (state.intent.status === 'SUCCEEDED' ||
+            state.intent.status === 'PARTIALLY_REFUNDED' ||
+            state.intent.status === 'REFUNDED') ? (
+            <PaymentRefundSection
+              intent={state.intent}
+              list={refunds}
+              onChanged={() => void reload()}
+            />
+          ) : null}
+          <section className="mb-4">
+            <h2 className="h5">Refunds</h2>
+            <ErrorAlert error={refundsError} />
+            {refunds === undefined ? null : (
+              <>
+                <RefundAmounts list={refunds} />
+                <RefundsTable list={refunds} accounts={accounts} />
+              </>
+            )}
+          </section>
           <section className="mb-4">
             <h2 className="h5">Journal entries</h2>
             <ErrorAlert error={entriesError} />
             {entries === undefined ? null : entries.length === 0 ? (
               <p className="text-body-secondary">
                 No journal entries. A payment is posted to the ledger when it
-                succeeds; declines and pending payments post nothing.
+                succeeds, and a refund when it succeeds; declines, pending
+                payments, and pending or failed refunds post nothing.
               </p>
             ) : (
               <JournalEntriesTable entries={entries} linkPayments={false} />

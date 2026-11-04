@@ -65,6 +65,7 @@ export {
   LEDGER_ACCOUNTS,
   LEDGER_ACCOUNT_CLASSIFICATIONS,
   PROCESSOR_RECEIVABLE_ACCOUNT,
+  REFUNDS_ACCOUNT,
   SALES_ACCOUNT,
   isLedgerAccountCode,
   ledgerAccountDefinition,
@@ -83,4 +84,16 @@ export {
   type JournalLineDraft,
 } from './ledger/journal-entry.js';
 export { salePostingLines } from './ledger/sale-posting.js';
+export { refundPostingLines } from './ledger/refund-posting.js';
 export { accountBalance } from './ledger/account-balance.js';
+export {
+  evaluateRefundRequest,
+  refundTotals,
+  refundedStatusOf,
+  type CountedRefund,
+  type RefundRequestResult,
+  type RefundStanding,
+  type RefundTotals,
+  type RefundTotalsFailure,
+  type RefundTotalsResult,
+} from './refund/refund-rule.js';

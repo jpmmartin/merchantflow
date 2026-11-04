@@ -1,6 +1,7 @@
 import type {
   PaymentAttemptStatus,
   PaymentIntentStatus,
+  RefundStatus,
 } from '../api/payments';
 
 const STATUS_CLASS: Readonly<Record<PaymentIntentStatus, string>> = {
@@ -10,6 +11,8 @@ const STATUS_CLASS: Readonly<Record<PaymentIntentStatus, string>> = {
   SUCCEEDED: 'text-bg-success',
   FAILED: 'text-bg-danger',
   UNKNOWN: 'text-bg-warning',
+  PARTIALLY_REFUNDED: 'text-bg-dark',
+  REFUNDED: 'text-bg-dark',
 };
 
 const ATTEMPT_STATUS_CLASS: Readonly<Record<PaymentAttemptStatus, string>> = {
@@ -17,6 +20,14 @@ const ATTEMPT_STATUS_CLASS: Readonly<Record<PaymentAttemptStatus, string>> = {
   REQUIRES_ACTION: 'text-bg-primary',
   SUCCEEDED: 'text-bg-success',
   DECLINED: 'text-bg-danger',
+  FAILED: 'text-bg-danger',
+  UNKNOWN: 'text-bg-warning',
+};
+
+const REFUND_STATUS_CLASS: Readonly<Record<RefundStatus, string>> = {
+  EXECUTING: 'text-bg-info',
+  PENDING: 'text-bg-primary',
+  SUCCEEDED: 'text-bg-success',
   FAILED: 'text-bg-danger',
   UNKNOWN: 'text-bg-warning',
 };
@@ -38,5 +49,16 @@ export function PaymentAttemptStatusBadge({
 }) {
   return (
     <span className={`badge ${ATTEMPT_STATUS_CLASS[status]}`}>{status}</span>
+  );
+}
+
+/** A refund status as a coloured badge. */
+export function RefundStatusBadge({
+  status,
+}: {
+  readonly status: RefundStatus;
+}) {
+  return (
+    <span className={`badge ${REFUND_STATUS_CLASS[status]}`}>{status}</span>
   );
 }

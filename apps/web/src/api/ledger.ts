@@ -1,7 +1,7 @@
 import { apiRequest } from './client';
 
 export type LedgerAccountClassification =
-  'ASSET' | 'LIABILITY' | 'REVENUE' | 'EXPENSE';
+  'ASSET' | 'LIABILITY' | 'REVENUE' | 'EXPENSE' | 'CONTRA_REVENUE';
 
 export type JournalLineSide = 'DEBIT' | 'CREDIT';
 

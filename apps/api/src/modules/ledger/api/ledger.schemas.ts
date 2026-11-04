@@ -93,12 +93,12 @@ export const journalEntryResponseSchema = z.object({
   source_type: z
     .enum(JOURNAL_SOURCE_TYPES)
     .describe(
-      'The business event the entry records. PAYMENT_SALE: the captured sale of a successful payment attempt.',
+      'The business event the entry records. PAYMENT_SALE: the captured sale of a successful payment attempt. PAYMENT_REFUND: a successful refund of a captured payment.',
     ),
   source_id: z
     .uuid()
     .describe(
-      'Identifier of the event, posted at most once: for PAYMENT_SALE, the successful payment attempt.',
+      'Identifier of the event, posted at most once: for PAYMENT_SALE, the successful payment attempt; for PAYMENT_REFUND, the refund.',
     ),
   payment_intent_id: z.uuid().nullable(),
   description: z.string(),

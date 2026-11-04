@@ -122,7 +122,9 @@ export interface PaymentIntentsTable {
     | 'SUCCEEDED'
     | 'FAILED'
     | 'UNKNOWN'
-    | 'REQUIRES_ACTION';
+    | 'REQUIRES_ACTION'
+    | 'PARTIALLY_REFUNDED'
+    | 'REFUNDED';
   created_at: ColumnType<Date, Date, never>;
   updated_at: Date;
 }
@@ -248,6 +250,45 @@ export type PaymentAttemptRow = Selectable<PaymentAttemptsTable>;
 export type NewPaymentAttemptRow = Insertable<PaymentAttemptsTable>;
 
 /**
+ * Row of `refunds`, owned by the payments module. The identity columns, the
+ * amount, and the currency cannot be updated, matching the
+ * `refunds_restrict_update` trigger, which also refuses any change of a
+ * finished refund. `amount_minor` is a `BIGINT` greater than zero, read as a
+ * `bigint`. `status` lists the values of `refunds_status_check` and
+ * `error_category` those of `refunds_error_category_check`.
+ */
+export interface RefundsTable {
+  id: ColumnType<string, string, never>;
+  merchant_id: ColumnType<string, string, never>;
+  payment_intent_id: ColumnType<string, string, never>;
+  payment_attempt_id: ColumnType<string, string, never>;
+  processor_account_id: ColumnType<string, string, never>;
+  operation_id: ColumnType<string, string, never>;
+  idempotency_record_id: ColumnType<string, string, never>;
+  amount_minor: ColumnType<bigint, bigint, never>;
+  currency: ColumnType<string, string, never>;
+  status: 'EXECUTING' | 'PENDING' | 'SUCCEEDED' | 'FAILED' | 'UNKNOWN';
+  provider_refund_id: string | null;
+  failure_code: string | null;
+  error_category:
+    | 'CONFIGURATION'
+    | 'NETWORK'
+    | 'GATEWAY'
+    | 'ISSUER_DECLINE'
+    | 'INVALID_REQUEST'
+    | 'UNKNOWN'
+    | null;
+  created_at: ColumnType<Date, Date, never>;
+  updated_at: Date;
+}
+
+/** A `refunds` row as selected, with every column at its read type. */
+export type RefundRow = Selectable<RefundsTable>;
+
+/** A `refunds` row as inserted. */
+export type NewRefundRow = Insertable<RefundsTable>;
+
+/**
  * Row of `ledger_accounts`, owned by the ledger module. No column has an update
  * type: the `ledger_accounts_restrict_change` trigger rejects every update and
  * delete. `classification` lists the values of
@@ -259,8 +300,8 @@ export interface LedgerAccountsTable {
   code: ColumnType<string, string, never>;
   name: ColumnType<string, string, never>;
   classification: ColumnType<
-    'ASSET' | 'LIABILITY' | 'REVENUE' | 'EXPENSE',
-    'ASSET' | 'LIABILITY' | 'REVENUE' | 'EXPENSE',
+    'ASSET' | 'LIABILITY' | 'REVENUE' | 'EXPENSE' | 'CONTRA_REVENUE',
+    'ASSET' | 'LIABILITY' | 'REVENUE' | 'EXPENSE' | 'CONTRA_REVENUE',
     never
   >;
   currency: ColumnType<string, string, never>;
@@ -279,7 +320,11 @@ export type LedgerAccountRow = Selectable<LedgerAccountsTable>;
 export interface JournalEntriesTable {
   id: ColumnType<string, string, never>;
   merchant_id: ColumnType<string, string, never>;
-  source_type: ColumnType<'PAYMENT_SALE', 'PAYMENT_SALE', never>;
+  source_type: ColumnType<
+    'PAYMENT_SALE' | 'PAYMENT_REFUND',
+    'PAYMENT_SALE' | 'PAYMENT_REFUND',
+    never
+  >;
   source_id: ColumnType<string, string, never>;
   payment_intent_id: ColumnType<string | null, string | null, never>;
   description: ColumnType<string, string, never>;
@@ -320,6 +365,7 @@ export interface DatabaseSchema {
   user_sessions: UserSessionsTable;
   processor_accounts: ProcessorAccountsTable;
   payment_attempts: PaymentAttemptsTable;
+  refunds: RefundsTable;
   ledger_accounts: LedgerAccountsTable;
   journal_entries: JournalEntriesTable;
   journal_lines: JournalLinesTable;

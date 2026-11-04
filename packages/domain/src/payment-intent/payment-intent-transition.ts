@@ -61,6 +61,10 @@ type TransitionGuard = 'ALWAYS' | 'RETRY_AVAILABLE' | 'ATTEMPTS_EXHAUSTED';
  * - Decline, failed authentication, or proven non-execution: back to `CREATED`
  *   while retries remain, `FAILED` at the third unsuccessful attempt. From
  *   `UNKNOWN` this is the resolution once non-execution is proven.
+ * - Refund of a captured payment: `SUCCEEDED` to `PARTIALLY_REFUNDED` or
+ *   `REFUNDED`; `PARTIALLY_REFUNDED` to itself (a further partial refund, the
+ *   only self-transition the table lists) or to `REFUNDED`. `REFUNDED` is
+ *   terminal.
  */
 const TRANSITIONS: Readonly<
   Record<
@@ -87,9 +91,24 @@ const TRANSITIONS: Readonly<
     CREATED: 'RETRY_AVAILABLE',
     FAILED: 'ATTEMPTS_EXHAUSTED',
   },
-  SUCCEEDED: {},
+  SUCCEEDED: { PARTIALLY_REFUNDED: 'ALWAYS', REFUNDED: 'ALWAYS' },
   FAILED: {},
+  PARTIALLY_REFUNDED: { PARTIALLY_REFUNDED: 'ALWAYS', REFUNDED: 'ALWAYS' },
+  REFUNDED: {},
 };
+
+/**
+ * Statuses whose payment outcome is final: the payment was captured, refunded
+ * in part or in full, or failed. Nothing can move them back into the payment
+ * lifecycle, so a target outside their row is `TERMINAL_STATUS`; only the
+ * refund targets of their row are allowed.
+ */
+const SETTLED_STATUSES: ReadonlySet<PaymentIntentStatus> = new Set([
+  'SUCCEEDED',
+  'FAILED',
+  'PARTIALLY_REFUNDED',
+  'REFUNDED',
+]);
 
 function isValidAttemptCount(value: number | undefined): value is number {
   return typeof value === 'number' && Number.isInteger(value) && value >= 1;
@@ -106,16 +125,20 @@ export function evaluatePaymentIntentTransition(
   to: PaymentIntentStatus,
   context: PaymentIntentTransitionContext = {},
 ): PaymentIntentTransitionResult {
-  if (from === to) {
+  const targets = TRANSITIONS[from];
+  const guard = Object.hasOwn(targets, to) ? targets[to] : undefined;
+  if (from === to && guard === undefined) {
     return { ok: false, code: 'SAME_STATUS', from, to };
   }
-  const targets = TRANSITIONS[from];
-  if (Object.keys(targets).length === 0) {
-    return { ok: false, code: 'TERMINAL_STATUS', from, to };
-  }
-  const guard = Object.hasOwn(targets, to) ? targets[to] : undefined;
   if (guard === undefined) {
-    return { ok: false, code: 'TRANSITION_NOT_ALLOWED', from, to };
+    return {
+      ok: false,
+      code: SETTLED_STATUSES.has(from)
+        ? 'TERMINAL_STATUS'
+        : 'TRANSITION_NOT_ALLOWED',
+      from,
+      to,
+    };
   }
   if (guard === 'ALWAYS') {
     return { ok: true, from, to };

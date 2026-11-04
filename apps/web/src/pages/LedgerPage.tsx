@@ -80,7 +80,9 @@ export function LedgerPage({
         The merchant&apos;s own payments ledger: captured card sales are owed to
         the merchant by its processor account (Processor receivable) and
         recorded as Sales, gross of processor fees, which are not recorded yet.
-        Balances are computed from the journal lines on every read.
+        A successful refund is recorded in Refunds, which reduces Sales, and
+        lowers the Processor receivable. Balances are computed from the journal
+        lines on every read.
       </p>
       <section className="mb-4">
         <h2 className="h5">Accounts and balances</h2>

@@ -5,7 +5,8 @@ import type { PositiveMoney } from '../money/money.js';
  * to collect an amount; each execution against a processor is a payment
  * attempt with its own lifecycle, modeled separately. `REQUIRES_ACTION` means
  * the customer must complete a step, such as 3D Secure, before the provider
- * decides the payment.
+ * decides the payment. `PARTIALLY_REFUNDED` and `REFUNDED` follow a captured
+ * payment (`SUCCEEDED`) once part or all of its amount was refunded.
  */
 export const PAYMENT_INTENT_STATUSES = [
   'CREATED',
@@ -14,6 +15,8 @@ export const PAYMENT_INTENT_STATUSES = [
   'FAILED',
   'UNKNOWN',
   'REQUIRES_ACTION',
+  'PARTIALLY_REFUNDED',
+  'REFUNDED',
 ] as const;
 
 export type PaymentIntentStatus = (typeof PAYMENT_INTENT_STATUSES)[number];

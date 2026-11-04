@@ -38,6 +38,9 @@ export const ERROR_CODES = [
   'PROCESSOR_ACCOUNT_NOT_FOUND',
   'PROCESSOR_ACCOUNT_NOT_DEFAULT',
   'PROCESSOR_LOOKUP_UNAVAILABLE',
+  'PAYMENT_INTENT_NOT_REFUNDABLE',
+  'REFUND_AMOUNT_EXCEEDS_REFUNDABLE',
+  'REFUND_OUTCOME_UNKNOWN',
   'PAYLOAD_TOO_LARGE',
   'UNSUPPORTED_MEDIA_TYPE',
   'REQUEST_REJECTED',
@@ -237,8 +240,8 @@ export const ERROR_DEFINITIONS: Readonly<Record<ErrorCode, ErrorDefinition>> = {
     status: 409,
     message: 'Another attempt of this payment is still in progress.',
   },
-  // The payment intent is SUCCEEDED or FAILED; neither status accepts a new
-  // attempt.
+  // The payment intent is in a final status (SUCCEEDED, FAILED,
+  // PARTIALLY_REFUNDED, or REFUNDED); none accepts a new attempt.
   PAYMENT_INTENT_NOT_CONFIRMABLE: {
     status: 409,
     message: 'The payment is in a final status and cannot be confirmed.',
@@ -266,6 +269,28 @@ export const ERROR_DEFINITIONS: Readonly<Record<ErrorCode, ErrorDefinition>> = {
     status: 503,
     message:
       'The processor could not report the payment status. Nothing was changed; retry later.',
+  },
+  // Only a captured payment that is not fully refunded can be refunded: the
+  // payment intent must be SUCCEEDED or PARTIALLY_REFUNDED.
+  PAYMENT_INTENT_NOT_REFUNDABLE: {
+    status: 409,
+    message:
+      'The payment cannot be refunded: only a captured payment that is not fully refunded can be.',
+  },
+  // The requested amount is above what can still be refunded: the captured
+  // amount minus the refunds that succeeded or are still in progress.
+  REFUND_AMOUNT_EXCEEDS_REFUNDABLE: {
+    status: 409,
+    message:
+      'The refund amount is above the amount that can still be refunded, which counts refunds still in progress.',
+  },
+  // A refund of the payment intent may have returned money and its outcome is
+  // not known yet, so no new refund can start under any key until it is
+  // resolved. Refunding again could refund twice.
+  REFUND_OUTCOME_UNKNOWN: {
+    status: 409,
+    message:
+      'An earlier refund of this payment has an unknown outcome; do not refund again until it is resolved.',
   },
   PAYLOAD_TOO_LARGE: {
     status: 413,

@@ -5,7 +5,9 @@ import type {
   ProcessorCapability,
   ProcessorCredentials,
   ProcessorPaymentResult,
+  ProcessorRefundResult,
   ProcessorTransactionLookup,
+  RefundInput,
   SaleInput,
 } from '@merchantflow/processor-contracts';
 import Stripe from 'stripe';
@@ -16,6 +18,8 @@ import {
   PAYMENT_METHOD_ID,
   lookupErrorResult,
   paymentIntentResult,
+  refundErrorResult,
+  refundResult,
   saleErrorResult,
 } from './stripe-results.js';
 
@@ -53,6 +57,14 @@ const READ_MAX_NETWORK_RETRIES = 1;
 const SALE_MAX_NETWORK_RETRIES = 2;
 
 /**
+ * Automatic retries of a refund, on the same conditions as a sale. Every try
+ * sends the refund's operation ID as the same `Idempotency-Key`, so Stripe
+ * answers a retry of an executed refund with its first result instead of
+ * refunding again. A refund uses the sale's timeout.
+ */
+const REFUND_MAX_NETWORK_RETRIES = 2;
+
+/**
  * Stripe behind the processor port. The adapter holds no credentials: every
  * call builds a client from the keys of the one account it acts for, and the
  * client is dropped when the call returns. No Stripe type leaves this package,
@@ -64,6 +76,8 @@ export class StripeAdapter implements ProcessorAdapter {
   readonly capabilities: ReadonlySet<ProcessorCapability> = new Set([
     'CREDENTIAL_VALIDATION',
     'SALE',
+    'REFUND',
+    'PARTIAL_REFUND',
     'TRANSACTION_LOOKUP',
     'PROVIDER_IDEMPOTENCY',
   ]);
@@ -209,6 +223,66 @@ export class StripeAdapter implements ProcessorAdapter {
       return { outcome: 'unavailable', category: 'CONFIGURATION' };
     }
     return { outcome: 'found', result: paymentIntentResult(intent) };
+  }
+
+  /**
+   * Creates one Refund of a PaymentIntent (`POST /v1/refunds` with
+   * `payment_intent` and `amount`), with the refund's operation ID as the
+   * idempotency key of every try and the merchant, intent, and refund IDs as
+   * metadata. The PaymentIntent is expanded in the answer because the Refund
+   * object carries no `livemode`: a refund of a live-mode PaymentIntent is
+   * refused as `unknown`, since it may have moved real money.
+   *
+   * Refused before any call, as `failed`: a key that is not a test secret key
+   * (`CONFIGURATION`), a transaction that is not a `pi_` ID, and an amount that
+   * `toStripeAmount` refuses (`INVALID_REQUEST`).
+   */
+  async refund(input: RefundInput): Promise<ProcessorRefundResult> {
+    if (checkStripeKey(input.credentials.secretKey, 'secret') !== undefined) {
+      return {
+        status: 'failed',
+        providerRefundId: null,
+        category: 'CONFIGURATION',
+        failureCode: null,
+      };
+    }
+    const amount = toStripeAmount(input.amount);
+    if (!PAYMENT_INTENT_ID.test(input.providerTransactionId) || !amount.ok) {
+      return {
+        status: 'failed',
+        providerRefundId: null,
+        category: 'INVALID_REQUEST',
+        failureCode: null,
+      };
+    }
+
+    const client = this.client(input.credentials.secretKey, {
+      timeout: this.saleTimeoutMs,
+      maxNetworkRetries: REFUND_MAX_NETWORK_RETRIES,
+    });
+    let refund: Stripe.Refund;
+    try {
+      refund = await client.refunds.create(
+        {
+          payment_intent: input.providerTransactionId,
+          amount: amount.amount,
+          metadata: {
+            merchant_id: input.references.merchantId,
+            payment_intent_id: input.references.paymentIntentId,
+            refund_id: input.references.refundId,
+          },
+          expand: ['payment_intent'],
+        },
+        { idempotencyKey: input.operationId },
+      );
+    } catch (error) {
+      return refundErrorResult(error);
+    }
+    return refundResult(refund, {
+      paymentIntentId: input.providerTransactionId,
+      amount: amount.amount,
+      currency: amount.currency,
+    });
   }
 }
 

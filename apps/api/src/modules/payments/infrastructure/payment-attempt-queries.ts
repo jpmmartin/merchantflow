@@ -148,3 +148,22 @@ export async function listPaymentAttempts(
     .execute();
   return rows.map(toPaymentAttempt);
 }
+
+/**
+ * The successful attempt of an intent of the merchant, or `undefined`. The
+ * partial unique index `payment_attempts_one_succeeded_per_intent_idx` allows
+ * at most one.
+ */
+export async function findSucceededPaymentAttempt(
+  db: Database,
+  key: { readonly merchantId: string; readonly paymentIntentId: string },
+): Promise<PaymentAttempt | undefined> {
+  const row = await db
+    .selectFrom('payment_attempts')
+    .selectAll()
+    .where('merchant_id', '=', key.merchantId)
+    .where('payment_intent_id', '=', key.paymentIntentId)
+    .where('status', '=', 'SUCCEEDED')
+    .executeTakeFirst();
+  return row === undefined ? undefined : toPaymentAttempt(row);
+}

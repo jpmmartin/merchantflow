@@ -35,6 +35,8 @@ const EXPECTED: Readonly<
     FAILED: 'NOT_ALLOWED',
     UNKNOWN: 'NOT_ALLOWED',
     REQUIRES_ACTION: 'NOT_ALLOWED',
+    PARTIALLY_REFUNDED: 'NOT_ALLOWED',
+    REFUNDED: 'NOT_ALLOWED',
   },
   PROCESSING: {
     CREATED: 'RETRY',
@@ -43,6 +45,8 @@ const EXPECTED: Readonly<
     FAILED: 'EXHAUSTED',
     UNKNOWN: 'ALLOWED',
     REQUIRES_ACTION: 'ALLOWED',
+    PARTIALLY_REFUNDED: 'NOT_ALLOWED',
+    REFUNDED: 'NOT_ALLOWED',
   },
   SUCCEEDED: {
     CREATED: 'TERMINAL',
@@ -51,6 +55,8 @@ const EXPECTED: Readonly<
     FAILED: 'TERMINAL',
     UNKNOWN: 'TERMINAL',
     REQUIRES_ACTION: 'TERMINAL',
+    PARTIALLY_REFUNDED: 'ALLOWED',
+    REFUNDED: 'ALLOWED',
   },
   FAILED: {
     CREATED: 'TERMINAL',
@@ -59,6 +65,8 @@ const EXPECTED: Readonly<
     FAILED: 'SAME',
     UNKNOWN: 'TERMINAL',
     REQUIRES_ACTION: 'TERMINAL',
+    PARTIALLY_REFUNDED: 'TERMINAL',
+    REFUNDED: 'TERMINAL',
   },
   UNKNOWN: {
     CREATED: 'RETRY',
@@ -67,6 +75,8 @@ const EXPECTED: Readonly<
     FAILED: 'EXHAUSTED',
     UNKNOWN: 'SAME',
     REQUIRES_ACTION: 'NOT_ALLOWED',
+    PARTIALLY_REFUNDED: 'NOT_ALLOWED',
+    REFUNDED: 'NOT_ALLOWED',
   },
   REQUIRES_ACTION: {
     CREATED: 'RETRY',
@@ -75,6 +85,28 @@ const EXPECTED: Readonly<
     FAILED: 'EXHAUSTED',
     UNKNOWN: 'ALLOWED',
     REQUIRES_ACTION: 'SAME',
+    PARTIALLY_REFUNDED: 'NOT_ALLOWED',
+    REFUNDED: 'NOT_ALLOWED',
+  },
+  PARTIALLY_REFUNDED: {
+    CREATED: 'TERMINAL',
+    PROCESSING: 'TERMINAL',
+    SUCCEEDED: 'TERMINAL',
+    FAILED: 'TERMINAL',
+    UNKNOWN: 'TERMINAL',
+    REQUIRES_ACTION: 'TERMINAL',
+    PARTIALLY_REFUNDED: 'ALLOWED',
+    REFUNDED: 'ALLOWED',
+  },
+  REFUNDED: {
+    CREATED: 'TERMINAL',
+    PROCESSING: 'TERMINAL',
+    SUCCEEDED: 'TERMINAL',
+    FAILED: 'TERMINAL',
+    UNKNOWN: 'TERMINAL',
+    REQUIRES_ACTION: 'TERMINAL',
+    PARTIALLY_REFUNDED: 'TERMINAL',
+    REFUNDED: 'SAME',
   },
 };
 
@@ -157,6 +189,10 @@ describe('transition table', () => {
         'REQUIRES_ACTION->CREATED',
         'REQUIRES_ACTION->FAILED',
         'REQUIRES_ACTION->UNKNOWN',
+        'SUCCEEDED->PARTIALLY_REFUNDED',
+        'SUCCEEDED->REFUNDED',
+        'PARTIALLY_REFUNDED->PARTIALLY_REFUNDED',
+        'PARTIALLY_REFUNDED->REFUNDED',
       ].sort(),
     );
   });
@@ -265,9 +301,11 @@ describe('transition table', () => {
 
   describe('terminal statuses', () => {
     it.each(['SUCCEEDED', 'FAILED'] as const)(
-      '%s allows no transition to any status',
+      '%s allows no transition to a status of the payment lifecycle',
       (from) => {
-        for (const to of PAYMENT_INTENT_STATUSES) {
+        for (const to of PAYMENT_INTENT_STATUSES.filter(
+          (status) => status !== 'PARTIALLY_REFUNDED' && status !== 'REFUNDED',
+        )) {
           for (const unsuccessfulAttempts of [1, 2, 3]) {
             expect(
               evaluatePaymentIntentTransition(from, to, {
