@@ -15,7 +15,10 @@ import { GetPaymentIntentService } from './application/get-payment-intent.servic
 import { ListPaymentAttemptsService } from './application/list-payment-attempts.service.js';
 import { ListPaymentIntentsService } from './application/list-payment-intents.service.js';
 import { ListRefundsService } from './application/list-refunds.service.js';
+import { RefreshRefundService } from './application/refresh-refund.service.js';
 import { RefundPaymentIntentService } from './application/refund-payment-intent.service.js';
+import { ResolvePaymentAttemptService } from './application/resolve-payment-attempt.service.js';
+import { ResolveRefundService } from './application/resolve-refund.service.js';
 
 /**
  * Owns payment intents, payment attempts, refunds, and their endpoints. Commands claim
@@ -25,7 +28,9 @@ import { RefundPaymentIntentService } from './application/refund-payment-intent.
  * adapters of the processors module. A successful payment posts its sale,
  * and a successful refund its refund entry, through the ledger module's
  * posting service, in the Apply transaction.
- * Reads touch only the module's own tables.
+ * Reads touch only the module's own tables. The webhooks module resolves
+ * attempts and refunds from provider events through the exported resolution
+ * services, with the same conditional updates.
  */
 @Module({
   imports: [
@@ -47,6 +52,10 @@ import { RefundPaymentIntentService } from './application/refund-payment-intent.
     ApplyAttemptResolutionService,
     RefundPaymentIntentService,
     ListRefundsService,
+    ResolveRefundService,
+    RefreshRefundService,
+    ResolvePaymentAttemptService,
   ],
+  exports: [ResolveRefundService, ResolvePaymentAttemptService],
 })
 export class PaymentsModule {}

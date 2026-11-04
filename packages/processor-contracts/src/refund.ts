@@ -72,6 +72,33 @@ export type ProcessorRefundResult =
 
 export type ProcessorRefundStatus = ProcessorRefundResult['status'];
 
+/**
+ * A lookup of one refund at the provider, with the keys of the account it was
+ * made with. The refund must belong to `providerTransactionId` and return
+ * `amount`; a refund that does not is reported as `unknown`, never applied.
+ * `timeoutMs`, when given, bounds the lookup, with no automatic retry.
+ */
+export interface GetRefundInput {
+  readonly credentials: ProcessorCredentials;
+  readonly providerRefundId: string;
+  readonly providerTransactionId: string;
+  readonly amount: PositiveMoney;
+  readonly timeoutMs?: number;
+}
+
+/**
+ * The answer of a refund lookup: `found` with the refund's current state,
+ * normalized like the result of a refund, or `unavailable` when the provider
+ * gave no usable answer. A failed lookup says nothing about the refund, which
+ * keeps whatever state it had.
+ */
+export type ProcessorRefundLookup =
+  | { readonly outcome: 'found'; readonly result: ProcessorRefundResult }
+  | {
+      readonly outcome: 'unavailable';
+      readonly category: Exclude<ProcessorErrorCategory, 'ISSUER_DECLINE'>;
+    };
+
 /** Every refund status, in a fixed order, for exhaustive checks and documentation. */
 export const PROCESSOR_REFUND_STATUSES = [
   'succeeded',

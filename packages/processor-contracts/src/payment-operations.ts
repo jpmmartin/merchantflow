@@ -33,10 +33,15 @@ export interface SaleInput {
   readonly references: ProcessorOperationReferences;
 }
 
-/** A lookup of one transaction at the provider, with the account's keys. */
+/**
+ * A lookup of one transaction at the provider, with the account's keys.
+ * `timeoutMs`, when given, bounds the lookup, with no automatic retry, for a
+ * caller that must answer quickly, such as a webhook.
+ */
 export interface GetTransactionInput {
   readonly credentials: ProcessorCredentials;
   readonly providerTransactionId: string;
+  readonly timeoutMs?: number;
 }
 
 /**

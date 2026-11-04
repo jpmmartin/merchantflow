@@ -5,6 +5,7 @@ import type { ProcessorAccount } from '../api/merchants';
 import {
   createRefund,
   type PaymentIntent,
+  type Refund,
   type RefundCreation,
   type RefundList,
 } from '../api/payments';
@@ -71,13 +72,21 @@ export function RefundAmounts({ list }: { readonly list: RefundList }) {
   );
 }
 
-/** The refunds of an intent, oldest first. */
+/**
+ * The refunds of an intent, oldest first. With `onCheck`, each `PENDING` or
+ * `UNKNOWN` refund has a "Check with Stripe" button.
+ */
 export function RefundsTable({
   list,
   accounts,
+  onCheck,
+  checkingId,
 }: {
   readonly list: RefundList;
   readonly accounts: readonly ProcessorAccount[] | undefined;
+  readonly onCheck?: (refund: Refund) => void;
+  /** The refund being checked, while a check runs. */
+  readonly checkingId?: string | undefined;
 }) {
   const accountName = (id: string): string => {
     const account = accounts?.find((each) => each.id === id);
@@ -100,6 +109,7 @@ export function RefundsTable({
             <th>Account</th>
             <th>Failure</th>
             <th>Updated</th>
+            {onCheck === undefined ? null : <th />}
           </tr>
         </thead>
         <tbody>
@@ -139,6 +149,23 @@ export function RefundsTable({
                 )}
               </td>
               <td>{formatTime(refund.updated_at)}</td>
+              {onCheck === undefined ? null : (
+                <td className="text-end text-nowrap">
+                  {refund.status === 'PENDING' ||
+                  refund.status === 'UNKNOWN' ? (
+                    <button
+                      type="button"
+                      className="btn btn-sm btn-outline-primary"
+                      disabled={checkingId !== undefined}
+                      onClick={() => onCheck(refund)}
+                    >
+                      {checkingId === refund.id
+                        ? 'Checking…'
+                        : 'Check with Stripe'}
+                    </button>
+                  ) : null}
+                </td>
+              )}
             </tr>
           ))}
         </tbody>
@@ -164,8 +191,9 @@ function RefundOutcomeAlert({ outcome }: { readonly outcome: RefundCreation }) {
       return (
         <div className="alert alert-info" role="status">
           <strong>Refund of {amount} is pending at Stripe.</strong> The amount
-          stays reserved; the payment status and the ledger change only when the
-          refund succeeds, which this version does not yet learn by itself.
+          stays reserved; the payment status and the ledger change when the
+          refund succeeds. Stripe reports it through the account&apos;s webhook,
+          or use <strong>Check with Stripe</strong> in the refunds table.
         </div>
       );
     case 'FAILED':
@@ -186,7 +214,8 @@ function RefundOutcomeAlert({ outcome }: { readonly outcome: RefundCreation }) {
         <div className="alert alert-warning" role="alert">
           <strong>Refund outcome unknown.</strong> Do not refund again: money
           may have been returned, and no new refund of this payment is accepted
-          until the outcome is resolved.
+          until the outcome is resolved, by the account&apos;s webhook or by{' '}
+          <strong>Check with Stripe</strong> once Stripe has identified it.
         </div>
       );
     case 'EXECUTING':

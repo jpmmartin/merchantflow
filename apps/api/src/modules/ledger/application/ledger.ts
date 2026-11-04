@@ -6,7 +6,11 @@ import type {
 } from '@merchantflow/domain';
 
 /** The source types of `journal_entries_source_type_check`. */
-export const JOURNAL_SOURCE_TYPES = ['PAYMENT_SALE', 'PAYMENT_REFUND'] as const;
+export const JOURNAL_SOURCE_TYPES = [
+  'PAYMENT_SALE',
+  'PAYMENT_REFUND',
+  'PAYMENT_REFUND_REVERSAL',
+] as const;
 
 export type JournalSourceType = (typeof JOURNAL_SOURCE_TYPES)[number];
 

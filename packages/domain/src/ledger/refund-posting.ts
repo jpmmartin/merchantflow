@@ -26,3 +26,20 @@ export function refundPostingLines(
     { accountCode: PROCESSOR_RECEIVABLE_ACCOUNT, side: 'CREDIT', amount },
   ]);
 }
+
+/**
+ * The posting rule of a refund that the processor failed after it had
+ * succeeded: the exact reverse of `refundPostingLines`, debit Processor
+ * receivable and credit Refunds by the refunded amount. The money came back to
+ * the merchant's processor balance, so the receivable grows again and the
+ * refund no longer reduces revenue. The original entry is never changed; this
+ * compensating entry offsets it.
+ */
+export function refundReversalPostingLines(
+  amount: PositiveMoney,
+): JournalEntryValidationResult {
+  return validateJournalEntry([
+    { accountCode: PROCESSOR_RECEIVABLE_ACCOUNT, side: 'DEBIT', amount },
+    { accountCode: REFUNDS_ACCOUNT, side: 'CREDIT', amount },
+  ]);
+}

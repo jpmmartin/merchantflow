@@ -25,12 +25,24 @@ export interface SecretBinding {
   readonly merchantId: string;
   readonly processorAccountId: string;
   readonly provider: string;
+  /**
+   * Which secret of the row it is: the provider secret key (the default) or
+   * the webhook signing secret. Each has its own associated data, so one
+   * cannot be decrypted in place of the other.
+   */
+  readonly purpose?: 'SECRET_KEY' | 'WEBHOOK_SIGNING_SECRET';
 }
+
+/** The label of each purpose; the secret key's is the one P-03 stored with. */
+const PURPOSE_LABELS = {
+  SECRET_KEY: 'merchantflow/processor-account-secret',
+  WEBHOOK_SIGNING_SECRET: 'merchantflow/processor-account-webhook-secret',
+} as const;
 
 function associatedData(binding: SecretBinding, keyVersion: number): Buffer {
   return Buffer.from(
     [
-      'merchantflow/processor-account-secret',
+      PURPOSE_LABELS[binding.purpose ?? 'SECRET_KEY'],
       `v${keyVersion}`,
       binding.merchantId,
       binding.processorAccountId,

@@ -8,6 +8,7 @@ import { HealthModule } from './modules/health/health.module.js';
 import { LedgerModule } from './modules/ledger/ledger.module.js';
 import { MerchantsModule } from './modules/merchants/merchants.module.js';
 import { PaymentsModule } from './modules/payments/payments.module.js';
+import { WebhooksModule } from './modules/webhooks/webhooks.module.js';
 
 @Module({
   imports: [
@@ -20,6 +21,7 @@ import { PaymentsModule } from './modules/payments/payments.module.js';
     MerchantsModule,
     LedgerModule,
     PaymentsModule,
+    WebhooksModule,
   ],
 })
 export class AppModule {}

@@ -36,6 +36,23 @@ const FAKE_LIVE_SECRET_KEY = ['sk', 'live', 'tenant0isolation0fixture'].join(
   '_',
 );
 
+/**
+ * A webhook signing secret that exists nowhere, for the manual webhook
+ * configuration, which stores it without calling Stripe. It is built from
+ * parts so that secret scanners do not take the fixture for a secret.
+ */
+const FAKE_WEBHOOK_SIGNING_SECRET = ['whsec', 'tenant0isolation0fixture'].join(
+  '_',
+);
+
+/**
+ * A refund ID for the refund check route. The tenants have no refunds, so the
+ * refund is always unknown and the check never reaches Stripe; the intent is
+ * checked first, so another merchant's intent is 404 before the refund is
+ * read.
+ */
+const NO_REFUND_ID = '00000000-0000-4000-8000-000000000000';
+
 /** A request a route entry builds for a set of resources. */
 export interface BuiltRequest {
   /** Path below the API prefix, with its query string if any. */
@@ -275,6 +292,53 @@ export const TENANT_ROUTES: readonly TenantRoute[] = [
   },
   {
     kind: 'resource',
+    route: 'GET /merchants/:id/processor-accounts/:processorAccountId/webhook',
+    request: (r) => ({
+      path: `/merchants/${r.merchantId}/processor-accounts/${r.processorAccountId}/webhook`,
+    }),
+    nested: true,
+    platformExisting: 200,
+    platformMissing: 404,
+  },
+  {
+    // The manual path stores the pasted secret without calling Stripe, so no
+    // request of the suite reaches a provider.
+    kind: 'resource',
+    route: 'POST /merchants/:id/processor-accounts/:processorAccountId/webhook',
+    request: (r) => ({
+      path: `/merchants/${r.merchantId}/processor-accounts/${r.processorAccountId}/webhook`,
+      body: { mode: 'MANUAL', signing_secret: FAKE_WEBHOOK_SIGNING_SECRET },
+    }),
+    nested: true,
+    platformExisting: 200,
+    platformMissing: 404,
+  },
+  {
+    // A manual configuration has no Stripe endpoint to delete, and an account
+    // without one succeeds with no change, so no request reaches a provider.
+    kind: 'resource',
+    route:
+      'POST /merchants/:id/processor-accounts/:processorAccountId/webhook/remove',
+    request: (r) => ({
+      path: `/merchants/${r.merchantId}/processor-accounts/${r.processorAccountId}/webhook/remove`,
+    }),
+    nested: true,
+    platformExisting: 200,
+    platformMissing: 404,
+  },
+  {
+    kind: 'resource',
+    route:
+      'GET /merchants/:id/processor-accounts/:processorAccountId/webhook/events',
+    request: (r) => ({
+      path: `/merchants/${r.merchantId}/processor-accounts/${r.processorAccountId}/webhook/events`,
+    }),
+    nested: true,
+    platformExisting: 200,
+    platformMissing: 404,
+  },
+  {
+    kind: 'resource',
     route: 'GET /merchants/:id/ledger/balances',
     request: (r) => ({ path: `/merchants/${r.merchantId}/ledger/balances` }),
     platformExisting: 200,
@@ -411,6 +475,21 @@ export const TENANT_ROUTES: readonly TenantRoute[] = [
     platformExisting: 403,
     platformMissing: 403,
   },
+  {
+    // Another merchant's intent is 404 before the role or the refund is read,
+    // and the refund ID names no refund, so no request reaches a provider. The
+    // platform key is refused by the guard for every id.
+    kind: 'resource',
+    route: 'POST /payment-intents/:id/refunds/:refundId/refresh',
+    request: (r) => ({
+      path: `/payment-intents/${r.paymentIntentId}/refunds/${NO_REFUND_ID}/refresh`,
+    }),
+    platformExisting: 403,
+    platformMissing: 403,
+  },
+  // `POST /webhooks/stripe/:processorAccountId` is not listed: it is public
+  // (`@Public()`), authenticated only by the Stripe signature, so route
+  // discovery classifies it as public.
 ];
 
 /** The method and path of an entry, split. */

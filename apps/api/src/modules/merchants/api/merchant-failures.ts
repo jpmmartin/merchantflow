@@ -16,7 +16,10 @@ export type MerchantFailureCode =
   | 'PROCESSOR_UNAVAILABLE'
   | 'ALREADY_CONNECTED'
   | 'DISABLED'
-  | 'LOCK_TIMEOUT';
+  | 'LOCK_TIMEOUT'
+  | 'PUBLIC_BASE_URL_NOT_CONFIGURED'
+  | 'ENDPOINT_REJECTED'
+  | 'CONFIGURATION_CHANGED';
 
 /**
  * The exception for a refused request. Both "not found" outcomes become the
@@ -54,5 +57,22 @@ export function toApiException(code: MerchantFailureCode): ApiException {
       return new ApiException('PROCESSOR_ACCOUNT_DISABLED');
     case 'LOCK_TIMEOUT':
       return new ApiException('OPERATION_TIMEOUT');
+    case 'PUBLIC_BASE_URL_NOT_CONFIGURED':
+      return new ApiException('PUBLIC_BASE_URL_NOT_CONFIGURED');
+    case 'ENDPOINT_REJECTED':
+      return new ApiException('WEBHOOK_ENDPOINT_REJECTED');
+    case 'CONFIGURATION_CHANGED':
+      return new ApiException('WEBHOOK_CONFIGURATION_CHANGED');
   }
+}
+
+/**
+ * The exception for a refused webhook configuration change. A provider that
+ * gave no usable answer has its own code here, because the message of
+ * `PROCESSOR_UNAVAILABLE` is about credential validation.
+ */
+export function toWebhookApiException(code: MerchantFailureCode): ApiException {
+  return code === 'PROCESSOR_UNAVAILABLE'
+    ? new ApiException('WEBHOOK_PROVIDER_UNAVAILABLE')
+    : toApiException(code);
 }

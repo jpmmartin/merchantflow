@@ -42,6 +42,14 @@ export const envSchema = z.object({
   // Email of the platform administrator user created by `pnpm db:seed`.
   // Without it the seed uses its documented default.
   SEED_ADMIN_EMAIL: z.email().optional(),
+  // Public base URL of the API (scheme, host, and optional port, no path), the
+  // address providers deliver webhooks to, such as the ngrok domain in local
+  // work. Without it, the automatic webhook configuration is refused with 503
+  // PUBLIC_BASE_URL_NOT_CONFIGURED. An empty value counts as unset.
+  PUBLIC_API_BASE_URL: z.preprocess(
+    (value) => (value === '' ? undefined : value),
+    z.string().regex(ORIGIN_PATTERN).optional(),
+  ),
   // Master key that encrypts the secret keys of processor accounts: 32 random
   // bytes in standard base64 (44 characters). It is a secret, so it has no
   // default. Outside production it may be unset, and connecting an account

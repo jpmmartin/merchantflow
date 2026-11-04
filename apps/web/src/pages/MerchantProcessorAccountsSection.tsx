@@ -11,6 +11,7 @@ import { ConfirmDialog } from '../components/ConfirmDialog';
 import { ErrorAlert } from '../components/ErrorAlert';
 import { formatTime } from '../components/format';
 import { canManageAccess } from '../components/navigation';
+import { ProcessorAccountWebhookPanel } from './ProcessorAccountWebhookPanel';
 
 interface MerchantProcessorAccountsSectionProps {
   readonly merchantId: string;
@@ -256,6 +257,24 @@ export function MerchantProcessorAccountsSection({
           </tbody>
         </table>
       </div>
+      {accounts !== undefined && accounts.length > 0 ? (
+        <>
+          <h3 className="h5 mt-4">Webhooks</h3>
+          <p className="text-body-secondary">
+            Each Stripe account sends its payment and refund events to its own
+            endpoint, signed with its own secret, so pending refunds and
+            payments finish without a manual check.
+          </p>
+          {accounts.map((account) => (
+            <ProcessorAccountWebhookPanel
+              key={account.id}
+              merchantId={merchantId}
+              account={account}
+              manage={manage}
+            />
+          ))}
+        </>
+      ) : null}
       {toDisable === undefined ? null : (
         <ConfirmDialog
           title="Disable processor account"

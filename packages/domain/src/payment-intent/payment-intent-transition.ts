@@ -62,9 +62,13 @@ type TransitionGuard = 'ALWAYS' | 'RETRY_AVAILABLE' | 'ATTEMPTS_EXHAUSTED';
  *   while retries remain, `FAILED` at the third unsuccessful attempt. From
  *   `UNKNOWN` this is the resolution once non-execution is proven.
  * - Refund of a captured payment: `SUCCEEDED` to `PARTIALLY_REFUNDED` or
- *   `REFUNDED`; `PARTIALLY_REFUNDED` to itself (a further partial refund, the
- *   only self-transition the table lists) or to `REFUNDED`. `REFUNDED` is
- *   terminal.
+ *   `REFUNDED`; `PARTIALLY_REFUNDED` to itself (a further partial refund, or a
+ *   refund that failed after success while others still succeeded; the only
+ *   self-transition the table lists) or to `REFUNDED`.
+ * - A refund that the provider failed after it had succeeded (P-10, approved
+ *   by the owner on 2026-11-03): `REFUNDED` back to `PARTIALLY_REFUNDED` or
+ *   `SUCCEEDED`, and `PARTIALLY_REFUNDED` back to `SUCCEEDED`, according to the
+ *   refunds that still succeeded.
  */
 const TRANSITIONS: Readonly<
   Record<
@@ -93,15 +97,20 @@ const TRANSITIONS: Readonly<
   },
   SUCCEEDED: { PARTIALLY_REFUNDED: 'ALWAYS', REFUNDED: 'ALWAYS' },
   FAILED: {},
-  PARTIALLY_REFUNDED: { PARTIALLY_REFUNDED: 'ALWAYS', REFUNDED: 'ALWAYS' },
-  REFUNDED: {},
+  PARTIALLY_REFUNDED: {
+    PARTIALLY_REFUNDED: 'ALWAYS',
+    REFUNDED: 'ALWAYS',
+    SUCCEEDED: 'ALWAYS',
+  },
+  REFUNDED: { PARTIALLY_REFUNDED: 'ALWAYS', SUCCEEDED: 'ALWAYS' },
 };
 
 /**
  * Statuses whose payment outcome is final: the payment was captured, refunded
  * in part or in full, or failed. Nothing can move them back into the payment
  * lifecycle, so a target outside their row is `TERMINAL_STATUS`; only the
- * refund targets of their row are allowed.
+ * refund targets of their row, and the moves back after a refund failed, are
+ * allowed.
  */
 const SETTLED_STATUSES: ReadonlySet<PaymentIntentStatus> = new Set([
   'SUCCEEDED',

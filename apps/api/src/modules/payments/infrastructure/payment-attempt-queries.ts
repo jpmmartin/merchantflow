@@ -167,3 +167,54 @@ export async function findSucceededPaymentAttempt(
     .executeTakeFirst();
   return row === undefined ? undefined : toPaymentAttempt(row);
 }
+
+/**
+ * The attempt a provider event is about, within one merchant and one of its
+ * processor accounts, or `undefined`: the attempt that holds the provider
+ * transaction ID, or else the attempt with the platform ID the provider
+ * object carries, as long as it has not learned another provider
+ * transaction. The second form finds an attempt whose outcome became unknown
+ * before it learned its provider transaction, such as after a timeout.
+ */
+export async function findPaymentAttemptForProviderObject(
+  db: Database,
+  key: {
+    readonly merchantId: string;
+    readonly processorAccountId: string;
+    readonly providerTransactionId: string;
+    readonly paymentAttemptId: string | null;
+  },
+): Promise<PaymentAttempt | undefined> {
+  const byTransaction = await db
+    .selectFrom('payment_attempts')
+    .selectAll()
+    .where('merchant_id', '=', key.merchantId)
+    .where('processor_account_id', '=', key.processorAccountId)
+    .where('provider_transaction_id', '=', key.providerTransactionId)
+    .executeTakeFirst();
+  if (byTransaction !== undefined) return toPaymentAttempt(byTransaction);
+  if (key.paymentAttemptId === null) return undefined;
+  const byId = await db
+    .selectFrom('payment_attempts')
+    .selectAll()
+    .where('merchant_id', '=', key.merchantId)
+    .where('processor_account_id', '=', key.processorAccountId)
+    .where('id', '=', key.paymentAttemptId)
+    .where('provider_transaction_id', 'is', null)
+    .executeTakeFirst();
+  return byId === undefined ? undefined : toPaymentAttempt(byId);
+}
+
+/** An attempt of the merchant by its id, or `undefined`. */
+export async function findPaymentAttemptById(
+  db: Database,
+  key: { readonly merchantId: string; readonly id: string },
+): Promise<PaymentAttempt | undefined> {
+  const row = await db
+    .selectFrom('payment_attempts')
+    .selectAll()
+    .where('merchant_id', '=', key.merchantId)
+    .where('id', '=', key.id)
+    .executeTakeFirst();
+  return row === undefined ? undefined : toPaymentAttempt(row);
+}

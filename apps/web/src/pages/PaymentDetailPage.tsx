@@ -7,9 +7,12 @@ import {
   getPaymentIntent,
   listPaymentAttempts,
   listRefunds,
+  refreshRefund,
   type PaymentAttempt,
   type PaymentIntent,
+  type Refund,
   type RefundList,
+  type RefundRefresh,
 } from '../api/payments';
 import { ErrorAlert } from '../components/ErrorAlert';
 import { formatTime } from '../components/format';
@@ -30,6 +33,50 @@ import {
   PaymentPaySection,
   type PaymentStepOutcome,
 } from './PaymentPaySection';
+
+/** What the last "Check with Stripe" found, in words the operator can act on. */
+function RefundCheckOutcome({
+  outcome,
+}: {
+  readonly outcome: RefundRefresh | undefined;
+}) {
+  if (outcome === undefined) return null;
+  const { refund } = outcome;
+  switch (outcome.change) {
+    case null:
+      return (
+        <div className="alert alert-info">
+          Stripe confirms the refund is {refund.status}. Nothing changed.
+        </div>
+      );
+    case 'REFUND_SUCCEEDED':
+      return (
+        <div className="alert alert-success">
+          Stripe reports the refund succeeded; the payment and the ledger are
+          updated.
+        </div>
+      );
+    case 'REFUND_PENDING':
+      return (
+        <div className="alert alert-info">
+          Stripe reports the refund is still pending.
+        </div>
+      );
+    case 'REFUND_FAILED':
+      return (
+        <div className="alert alert-warning">
+          Stripe reports the refund failed; its amount can be refunded again.
+        </div>
+      );
+    case 'REFUND_REVERSED':
+      return (
+        <div className="alert alert-warning">
+          Stripe failed the refund after it had succeeded; a reversal entry was
+          posted and the payment status was corrected.
+        </div>
+      );
+  }
+}
 
 type DetailState =
   | { readonly kind: 'loading' }
@@ -128,6 +175,27 @@ export function PaymentDetailPage({
     );
   }, [merchantId]);
 
+  const [checkingId, setCheckingId] = useState<string | undefined>(undefined);
+  const [checkOutcome, setCheckOutcome] = useState<RefundRefresh | undefined>(
+    undefined,
+  );
+  const [checkError, setCheckError] = useState<unknown>(undefined);
+
+  /** Checks one refund with Stripe, then reloads every section of the page. */
+  async function check(refund: Refund) {
+    setCheckingId(refund.id);
+    setCheckError(undefined);
+    setCheckOutcome(undefined);
+    try {
+      setCheckOutcome(await refreshRefund(paymentIntentId, refund.id));
+    } catch (caught) {
+      setCheckError(caught);
+    } finally {
+      setCheckingId(undefined);
+      await reload();
+    }
+  }
+
   const admin = canCreatePayments(principal.role);
   return (
     <>
@@ -195,7 +263,16 @@ export function PaymentDetailPage({
             {refunds === undefined ? null : (
               <>
                 <RefundAmounts list={refunds} />
-                <RefundsTable list={refunds} accounts={accounts} />
+                <RefundCheckOutcome outcome={checkOutcome} />
+                <ErrorAlert error={checkError} />
+                <RefundsTable
+                  list={refunds}
+                  accounts={accounts}
+                  checkingId={checkingId}
+                  {...(admin
+                    ? { onCheck: (refund) => void check(refund) }
+                    : {})}
+                />
               </>
             )}
           </section>

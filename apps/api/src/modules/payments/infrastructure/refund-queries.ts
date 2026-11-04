@@ -125,3 +125,90 @@ export async function updateRefundIfExecuting(
     .executeTakeFirst();
   return row === undefined ? undefined : toRefund(row);
 }
+
+/** A refund of the merchant by its id, or `undefined`. */
+export async function findRefundById(
+  db: Database,
+  key: { readonly merchantId: string; readonly id: string },
+): Promise<Refund | undefined> {
+  const row = await db
+    .selectFrom('refunds')
+    .selectAll()
+    .where('merchant_id', '=', key.merchantId)
+    .where('id', '=', key.id)
+    .executeTakeFirst();
+  return row === undefined ? undefined : toRefund(row);
+}
+
+/**
+ * The refund a provider event is about, within one merchant and one of its
+ * processor accounts, or `undefined`: the refund that holds the provider
+ * refund ID, or else the refund with the platform ID the provider object
+ * carries, as long as it has not learned another provider refund. The second
+ * form finds a refund whose outcome became unknown before it learned its
+ * provider ID, such as after a timeout.
+ */
+export async function findRefundForProviderObject(
+  db: Database,
+  key: {
+    readonly merchantId: string;
+    readonly processorAccountId: string;
+    readonly providerRefundId: string;
+    readonly refundId: string | null;
+  },
+): Promise<Refund | undefined> {
+  const byProviderId = await db
+    .selectFrom('refunds')
+    .selectAll()
+    .where('merchant_id', '=', key.merchantId)
+    .where('processor_account_id', '=', key.processorAccountId)
+    .where('provider_refund_id', '=', key.providerRefundId)
+    .executeTakeFirst();
+  if (byProviderId !== undefined) return toRefund(byProviderId);
+  if (key.refundId === null) return undefined;
+  const byId = await db
+    .selectFrom('refunds')
+    .selectAll()
+    .where('merchant_id', '=', key.merchantId)
+    .where('processor_account_id', '=', key.processorAccountId)
+    .where('id', '=', key.refundId)
+    .where('provider_refund_id', 'is', null)
+    .executeTakeFirst();
+  return byId === undefined ? undefined : toRefund(byId);
+}
+
+/**
+ * Applies a provider result to a refund only while it still has the expected
+ * status, and returns the refund as stored; `undefined` when no row matched,
+ * because another writer moved it first. The refund ID and the expected
+ * status are the guard: refunds have no lease yet (INC-04).
+ */
+export async function updateRefundIfStatus(
+  trx: DatabaseTransaction,
+  change: {
+    readonly merchantId: string;
+    readonly id: string;
+    readonly expectedStatus: Refund['status'];
+    readonly status: Refund['status'];
+    readonly providerRefundId: string | null;
+    readonly failureCode: string | null;
+    readonly errorCategory: Refund['errorCategory'];
+    readonly updatedAt: Date;
+  },
+): Promise<Refund | undefined> {
+  const row = await trx
+    .updateTable('refunds')
+    .set({
+      status: change.status,
+      provider_refund_id: change.providerRefundId,
+      failure_code: change.failureCode,
+      error_category: change.errorCategory,
+      updated_at: change.updatedAt,
+    })
+    .where('merchant_id', '=', change.merchantId)
+    .where('id', '=', change.id)
+    .where('status', '=', change.expectedStatus)
+    .returningAll()
+    .executeTakeFirst();
+  return row === undefined ? undefined : toRefund(row);
+}

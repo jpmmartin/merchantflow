@@ -1,4 +1,5 @@
 import type {
+  ProcessorErrorCategory,
   ProcessorPaymentResult,
   ProcessorRefundResult,
   ProcessorTransactionLookup,
@@ -159,26 +160,41 @@ export function saleErrorResult(error: unknown): ProcessorPaymentResult {
  * its category; an error that is not a Stripe error is thrown again.
  */
 export function lookupErrorResult(error: unknown): ProcessorTransactionLookup {
+  return { outcome: 'unavailable', category: unavailableCategoryOf(error) };
+}
+
+/** A category of a provider answer that is not usable. */
+export type UnavailableCategory = Exclude<
+  ProcessorErrorCategory,
+  'ISSUER_DECLINE'
+>;
+
+/**
+ * The category of an error of a call whose failure says nothing about the
+ * object it reads or changes, by the error's class alone; an error that is
+ * not a Stripe error is a defect and is thrown again.
+ */
+export function unavailableCategoryOf(error: unknown): UnavailableCategory {
   if (
     error instanceof Stripe.errors.StripeAuthenticationError ||
     error instanceof Stripe.errors.StripePermissionError
   ) {
-    return { outcome: 'unavailable', category: 'CONFIGURATION' };
+    return 'CONFIGURATION';
   }
   if (error instanceof Stripe.errors.StripeInvalidRequestError) {
-    return { outcome: 'unavailable', category: 'INVALID_REQUEST' };
+    return 'INVALID_REQUEST';
   }
   if (error instanceof Stripe.errors.StripeConnectionError) {
-    return { outcome: 'unavailable', category: 'NETWORK' };
+    return 'NETWORK';
   }
   if (
     error instanceof Stripe.errors.StripeAPIError ||
     error instanceof Stripe.errors.StripeRateLimitError
   ) {
-    return { outcome: 'unavailable', category: 'GATEWAY' };
+    return 'GATEWAY';
   }
   if (error instanceof Stripe.errors.StripeError) {
-    return { outcome: 'unavailable', category: 'UNKNOWN' };
+    return 'UNKNOWN';
   }
   throw error;
 }
@@ -193,8 +209,8 @@ export interface ExpectedRefund {
 const REFUND_UNKNOWN = { status: 'unknown', category: 'UNKNOWN' } as const;
 
 /**
- * Normalizes a Refund that Stripe returned for `refunds.create` with the
- * PaymentIntent expanded. The Refund object carries no `livemode`, so the
+ * Normalizes a Refund that Stripe returned for `refunds.create` or
+ * `refunds.retrieve` with the PaymentIntent expanded. The Refund object carries no `livemode`, so the
  * mode is read from the expanded PaymentIntent: a PaymentIntent in live mode,
  * or one that is not expanded, is `unknown` (the refund may have moved real
  * money, or the mode cannot be proven). A refund of another PaymentIntent,

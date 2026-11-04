@@ -325,3 +325,90 @@ export const processorAccountListResponseSchema = z.object({
 export type ProcessorAccountListResponse = z.infer<
   typeof processorAccountListResponseSchema
 >;
+
+/** A webhook signing secret as a provider shows it, such as Stripe's `whsec_...`. */
+export const WEBHOOK_SIGNING_SECRET_PATTERN = /^whsec_[A-Za-z0-9+/=_-]{1,249}$/;
+
+/**
+ * A webhook configuration to store. `AUTOMATIC` asks the platform to create
+ * the endpoint at the provider; `MANUAL` stores a signing secret the merchant
+ * copied from the endpoint it created. A validation issue names the field and
+ * the issue code, never the value (AD-46), so a secret never comes back in an
+ * error.
+ */
+export const configureProcessorAccountWebhookSchema = z.discriminatedUnion(
+  'mode',
+  [
+    z
+      .strictObject({ mode: z.literal('AUTOMATIC') })
+      .describe(
+        'The platform creates the endpoint in the Stripe account with its secret key.',
+      ),
+    z
+      .strictObject({
+        mode: z.literal('MANUAL'),
+        signing_secret: z
+          .string()
+          .regex(WEBHOOK_SIGNING_SECRET_PATTERN)
+          .describe(
+            'Signing secret of the endpoint created in the Stripe Dashboard (whsec_...). It is stored only encrypted and is never returned.',
+          ),
+      })
+      .describe('The merchant created the endpoint and pastes its secret.'),
+  ],
+);
+
+export type ConfigureProcessorAccountWebhookBody = z.infer<
+  typeof configureProcessorAccountWebhookSchema
+>;
+
+export const processorAccountWebhookResponseSchema = z.object({
+  processor_account_id: z.uuid(),
+  merchant_id: z.uuid(),
+  provider: z.string(),
+  endpoint_url: z
+    .string()
+    .nullable()
+    .describe(
+      'The URL the provider must deliver this account’s events to; null when the API has no public base URL.',
+    ),
+  configured: z
+    .boolean()
+    .describe(
+      'Whether a signing secret is stored, so deliveries are verified.',
+    ),
+  mode: z
+    .enum(['AUTOMATIC', 'MANUAL'])
+    .nullable()
+    .describe(
+      'AUTOMATIC: created by the platform at the provider. MANUAL: a pasted signing secret.',
+    ),
+  signing_secret_hint: z
+    .string()
+    .nullable()
+    .describe(
+      'Last four characters of the signing secret, which is never returned.',
+    ),
+  webhook_endpoint_id: z
+    .string()
+    .nullable()
+    .describe('The provider endpoint the platform created, such as we_...'),
+  configured_at: timestamp.nullable(),
+});
+
+export type ProcessorAccountWebhookResponse = z.infer<
+  typeof processorAccountWebhookResponseSchema
+>;
+
+export const configureProcessorAccountWebhookResponseSchema =
+  processorAccountWebhookResponseSchema.extend({
+    previous_endpoint: z
+      .enum(['NONE', 'DELETED', 'NOT_DELETED'])
+      .describe(
+        'What happened to the endpoint the platform had created for the replaced configuration: none to delete, deleted, or not deleted because the provider did not answer (its deliveries are refused).',
+      ),
+  });
+
+export type ConfigureProcessorAccountWebhookResponse = z.infer<
+  typeof configureProcessorAccountWebhookResponseSchema
+>;

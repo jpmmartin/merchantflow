@@ -1,11 +1,13 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { INestApplication } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { resolveCorsOrigins } from './modules/config/cors-origins.js';
 import type { Env } from './modules/config/env.schema.js';
 import { replyWithError } from './modules/errors/api/error-reply.js';
 import { createUnmatchedRequestLogger } from './modules/logging/logging.module.js';
+import { STRIPE_WEBHOOK_ROUTE } from './modules/webhooks/api/stripe-webhook.controller.js';
 
 /** Prefix of every business endpoint (master specification, section 16). */
 export const API_PREFIX = 'api/v1';
@@ -41,11 +43,42 @@ export async function configureApp(app: INestApplication): Promise<void> {
   app.setGlobalPrefix(API_PREFIX, { exclude: UNPREFIXED_PATHS });
   const config = app.get<ConfigService<Env, true>>(ConfigService);
   enableCors(app, config);
+  keepRawBodyOfWebhooks(app);
   if (config.get('NODE_ENV', { infer: true }) !== 'production') {
     mountOpenApi(app);
   }
   await app.init();
   replyNotFoundOutsideRoutes(app);
+}
+
+/** The path prefix of the webhook receiver, the only route that keeps raw bodies. */
+const WEBHOOK_PATH_PREFIX = `/${API_PREFIX}/${STRIPE_WEBHOOK_ROUTE}/`;
+
+/**
+ * Keeps the raw body of webhook deliveries, which signature verification
+ * needs byte for byte, and of no other request. It registers the JSON parser
+ * through Nest's documented `useBodyParser`, before `init()`, so Nest does not
+ * register its own; the parser is the same one with the same default options
+ * (100 kB limit), so every route parses JSON and maps parser errors exactly as
+ * before (AD-47). Its documented `verify` hook, which runs after the body is
+ * read and before it is parsed, attaches the buffer as `rawBody` (the property
+ * Nest's `RawBodyRequest` names) only to a POST under the webhook path.
+ */
+function keepRawBodyOfWebhooks(app: INestApplication): void {
+  (app as NestExpressApplication).useBodyParser('json', {
+    verify: (
+      request: IncomingMessage,
+      _response: ServerResponse,
+      buffer: Buffer,
+    ) => {
+      if (
+        request.method === 'POST' &&
+        request.url?.startsWith(WEBHOOK_PATH_PREFIX) === true
+      ) {
+        (request as IncomingMessage & { rawBody?: Buffer }).rawBody = buffer;
+      }
+    },
+  });
 }
 
 /**

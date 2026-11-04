@@ -48,6 +48,10 @@ services:
       STRIPE_TEST_A_PUBLISHABLE_KEY: ${STRIPE_TEST_A_PUBLISHABLE_KEY:-}
       STRIPE_TEST_B_SECRET_KEY: ${STRIPE_TEST_B_SECRET_KEY:-}
       STRIPE_TEST_B_PUBLISHABLE_KEY: ${STRIPE_TEST_B_PUBLISHABLE_KEY:-}
+      # Public base URL of the API, where Stripe delivers webhooks: the ngrok
+      # dev domain with https://, only when NGROK_DOMAIN is set, so an empty
+      # domain never becomes a bare "https://".
+      PUBLIC_API_BASE_URL: ${NGROK_DOMAIN:+https://${NGROK_DOMAIN}}
     volumes:
       - .:/workspace
       - node-modules:/workspace/node_modules
@@ -59,6 +63,28 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+
+  # Optional public tunnel for Stripe webhooks in local work, started only with
+  # `docker compose --profile webhooks up -d`. It forwards the account's
+  # ngrok dev domain to the API in `dev` and applies the traffic policy that
+  # lets through only POST requests to the webhook receiver. The local
+  # inspection UI is published on the host's loopback only.
+  ngrok:
+    image: ngrok/ngrok:3.39.13-alpine
+    profiles: ['webhooks']
+    command:
+      - http
+      - dev:3000
+      - --url=${NGROK_DOMAIN:-}
+      - --traffic-policy-file=/etc/ngrok/traffic-policy.yml
+    environment:
+      NGROK_AUTHTOKEN: ${NGROK_AUTHTOKEN:-}
+    volumes:
+      - ./ngrok/traffic-policy.yml:/etc/ngrok/traffic-policy.yml:ro
+    ports:
+      - '127.0.0.1:4040:4040'
+    depends_on:
+      - dev
 
 volumes:
   postgres-data:

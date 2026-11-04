@@ -3,6 +3,7 @@ import type { DatabaseTransaction } from '@merchantflow/database';
 import {
   ledgerAccountDefinition,
   refundPostingLines,
+  refundReversalPostingLines,
   salePostingLines,
   type BalancedJournalLines,
   type JournalEntryFailure,
@@ -107,6 +108,26 @@ export class LedgerPostingService {
       sourceId: command.refundId,
       paymentIntentId: command.paymentIntentId,
       description: `Card refund, order ${command.merchantReference}`,
+    });
+  }
+
+  /**
+   * Posts the compensating entry of a refund that the processor failed after
+   * it had succeeded, inside the caller's transaction: the reverse of the
+   * refund's entry, which stays as it was. The unique source (the refund under
+   * `PAYMENT_REFUND_REVERSAL`) makes a second reversal of the same refund
+   * fail.
+   */
+  async postPaymentRefundReversal(
+    trx: DatabaseTransaction,
+    command: PostPaymentRefundCommand,
+  ): Promise<PostPaymentSaleResult> {
+    return this.post(trx, refundReversalPostingLines(command.amount), {
+      merchantId: command.merchantId,
+      sourceType: 'PAYMENT_REFUND_REVERSAL',
+      sourceId: command.refundId,
+      paymentIntentId: command.paymentIntentId,
+      description: `Reversal of a failed card refund, order ${command.merchantReference}`,
     });
   }
 

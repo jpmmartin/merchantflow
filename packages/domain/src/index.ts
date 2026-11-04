@@ -84,7 +84,10 @@ export {
   type JournalLineDraft,
 } from './ledger/journal-entry.js';
 export { salePostingLines } from './ledger/sale-posting.js';
-export { refundPostingLines } from './ledger/refund-posting.js';
+export {
+  refundPostingLines,
+  refundReversalPostingLines,
+} from './ledger/refund-posting.js';
 export { accountBalance } from './ledger/account-balance.js';
 export {
   evaluateRefundRequest,

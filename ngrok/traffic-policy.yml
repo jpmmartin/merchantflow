@@ -1,0 +1,13 @@
+# Traffic policy of the ngrok agent of the `webhooks` Compose profile. The
+# public ngrok domain reaches only the webhook receiver: every request that is
+# not a POST below /api/v1/webhooks/stripe/ is denied by ngrok with 403 and
+# never reaches the API, so sign-in, merchants, payments, the health probes,
+# and the OpenAPI documents stay private to this machine.
+on_http_request:
+  - name: Allow only Stripe webhook deliveries
+    expressions:
+      - "!(req.method == 'POST' && req.url.path.startsWith('/api/v1/webhooks/stripe/'))"
+    actions:
+      - type: deny
+        config:
+          status_code: 403

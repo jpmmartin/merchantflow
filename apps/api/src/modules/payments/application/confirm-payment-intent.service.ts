@@ -16,7 +16,10 @@ import type {
 } from '@merchantflow/processor-contracts';
 import { Inject, Injectable } from '@nestjs/common';
 import { PinoLogger } from 'nestjs-pino';
-import type { Principal } from '../../auth/application/principal.js';
+import {
+  auditActorOf,
+  type Principal,
+} from '../../auth/application/principal.js';
 import { CLOCK, type Clock } from '../../clock/clock.js';
 import { DATABASE } from '../../database/database.module.js';
 import { ClaimIdempotencyKeyService } from '../../idempotency/application/claim-idempotency-key.service.js';
@@ -447,7 +450,7 @@ export class ConfirmPaymentIntentService {
         .setIsolationLevel('read committed')
         .execute((trx) =>
           this.applyResolution.execute(trx, {
-            principal: command.principal,
+            actor: auditActorOf(command.principal),
             correlationId: command.correlationId,
             intent,
             attempt,

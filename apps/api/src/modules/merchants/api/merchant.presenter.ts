@@ -4,6 +4,7 @@ import type { RevokedMerchantApiKey } from '../application/revoke-merchant-api-k
 import type { ApiKey } from '../../auth/application/api-key.js';
 import type { ApiKeySummary } from '../../auth/application/find-api-key.service.js';
 import type { UserSummary } from '../../auth/application/user.js';
+import type { ProcessorAccountWebhookView } from '../application/get-processor-account-webhook.service.js';
 import type { ProcessorAccount } from '../application/processor-account.js';
 import { encodeMerchantCursor } from './merchant-cursor.js';
 import type {
@@ -17,6 +18,7 @@ import type {
   MerchantResponse,
   ProcessorAccountListResponse,
   ProcessorAccountResponse,
+  ProcessorAccountWebhookResponse,
   RevokedApiKeyResponse,
 } from './merchant.schemas.js';
 
@@ -161,4 +163,21 @@ export function toProcessorAccountListResponse(
   accounts: readonly ProcessorAccount[],
 ): ProcessorAccountListResponse {
   return { data: accounts.map(toProcessorAccountResponse) };
+}
+
+export function toProcessorAccountWebhookResponse(
+  view: ProcessorAccountWebhookView,
+): ProcessorAccountWebhookResponse {
+  const { account, webhook } = view;
+  return {
+    processor_account_id: account.id,
+    merchant_id: account.merchantId,
+    provider: account.provider,
+    endpoint_url: view.endpointUrl,
+    configured: webhook !== null,
+    mode: webhook?.mode ?? null,
+    signing_secret_hint: webhook?.signingSecretHint ?? null,
+    webhook_endpoint_id: webhook?.endpointId ?? null,
+    configured_at: webhook?.configuredAt.toISOString() ?? null,
+  };
 }

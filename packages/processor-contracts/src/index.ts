@@ -30,12 +30,24 @@ export {
 export {
   PROCESSOR_REFUND_STATUSES,
   matchRefundResult,
+  type GetRefundInput,
+  type ProcessorRefundLookup,
   type ProcessorRefundReferences,
   type ProcessorRefundResult,
   type ProcessorRefundResultHandlers,
   type ProcessorRefundStatus,
   type RefundInput,
 } from './refund.js';
+export type {
+  CreateWebhookEndpointInput,
+  DeleteWebhookEndpointInput,
+  ProcessorEvent,
+  ProcessorEventReferences,
+  VerifyWebhookEventInput,
+  WebhookEndpointCreation,
+  WebhookEndpointDeletion,
+  WebhookEventVerification,
+} from './webhooks.js';
 export {
   PROVIDER_CODE_PATTERN,
   isProviderCode,

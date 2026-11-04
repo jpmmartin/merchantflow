@@ -3,9 +3,11 @@ import type { IdempotentResponse } from '../../idempotency/application/idempoten
 import type { RefundView } from '../application/refund-payment-intent.service.js';
 import type { Refund, RefundSummary } from '../application/refund.js';
 import { toPaymentIntentResponse } from './payment-intent.presenter.js';
+import type { RefundResolutionDetail } from '../application/resolve-refund.service.js';
 import type {
   RefundCreationResponse,
   RefundListResponse,
+  RefundRefreshResponse,
   RefundResponse,
 } from './refund.schemas.js';
 
@@ -74,5 +76,21 @@ export function toRefundListResponse(
     pending_amount_minor: toAmountMinorString(summary.inFlight),
     refundable_amount_minor: toAmountMinorString(summary.refundable),
     data: refunds.map(toRefundResponse),
+  };
+}
+
+/** The answer of a refund check: the refund, its intent, and what changed. */
+export function toRefundRefreshResponse(
+  view: RefundView,
+  change: RefundResolutionDetail | null,
+): RefundRefreshResponse {
+  return {
+    refund: toRefundResponse(view.refund),
+    payment_intent: {
+      ...toPaymentIntentResponse(view.intent),
+      refunded_amount_minor: toAmountMinorString(view.summary.refunded),
+      refundable_amount_minor: toAmountMinorString(view.summary.refundable),
+    },
+    change,
   };
 }

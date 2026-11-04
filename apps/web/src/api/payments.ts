@@ -227,3 +227,24 @@ export async function listRefunds(id: string): Promise<RefundList> {
     `/payment-intents/${encodeURIComponent(id)}/refunds`,
   )) as RefundList;
 }
+
+/** The answer of a refund check with Stripe. */
+export interface RefundRefresh extends RefundCreation {
+  readonly change:
+    | 'REFUND_SUCCEEDED'
+    | 'REFUND_FAILED'
+    | 'REFUND_PENDING'
+    | 'REFUND_REVERSED'
+    | null;
+}
+
+/** Checks a refund with Stripe and applies what Stripe reports. */
+export async function refreshRefund(
+  id: string,
+  refundId: string,
+): Promise<RefundRefresh> {
+  return (await apiRequest(
+    'POST',
+    `/payment-intents/${encodeURIComponent(id)}/refunds/${encodeURIComponent(refundId)}/refresh`,
+  )) as RefundRefresh;
+}

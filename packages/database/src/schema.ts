@@ -200,6 +200,26 @@ export interface ProcessorAccountsTable {
   is_default: boolean;
   created_at: ColumnType<Date, Date, never>;
   updated_at: Date;
+  /**
+   * The webhook configuration (P-10): all set or all null, as
+   * `processor_accounts_webhook_complete_check` requires. The signing secret
+   * is encrypted like the secret key; `webhook_endpoint_id` is set only for
+   * `AUTOMATIC`.
+   */
+  webhook_secret_ciphertext: ColumnType<
+    Buffer | null,
+    Buffer | null | undefined
+  >;
+  webhook_secret_iv: ColumnType<Buffer | null, Buffer | null | undefined>;
+  webhook_secret_auth_tag: ColumnType<Buffer | null, Buffer | null | undefined>;
+  webhook_secret_version: ColumnType<number | null, number | null | undefined>;
+  webhook_secret_hint: ColumnType<string | null, string | null | undefined>;
+  webhook_mode: ColumnType<
+    'AUTOMATIC' | 'MANUAL' | null,
+    'AUTOMATIC' | 'MANUAL' | null | undefined
+  >;
+  webhook_endpoint_id: ColumnType<string | null, string | null | undefined>;
+  webhook_configured_at: ColumnType<Date | null, Date | null | undefined>;
 }
 
 /** A `processor_accounts` row as selected, with every column at its read type. */
@@ -321,8 +341,8 @@ export interface JournalEntriesTable {
   id: ColumnType<string, string, never>;
   merchant_id: ColumnType<string, string, never>;
   source_type: ColumnType<
-    'PAYMENT_SALE' | 'PAYMENT_REFUND',
-    'PAYMENT_SALE' | 'PAYMENT_REFUND',
+    'PAYMENT_SALE' | 'PAYMENT_REFUND' | 'PAYMENT_REFUND_REVERSAL',
+    'PAYMENT_SALE' | 'PAYMENT_REFUND' | 'PAYMENT_REFUND_REVERSAL',
     never
   >;
   source_id: ColumnType<string, string, never>;
@@ -355,6 +375,30 @@ export interface JournalLinesTable {
 export type JournalLineRow = Selectable<JournalLinesTable>;
 
 /** Table types of the database, keyed by table name. */
+/**
+ * Row of `processor_events`, the webhook inbox owned by the webhooks module
+ * (P-10). The identity columns cannot be updated, matching the
+ * `processor_events_restrict_update` trigger, which also refuses any change of
+ * an event whose outcome is `PROCESSED` or `IGNORED`.
+ */
+export interface ProcessorEventsTable {
+  id: ColumnType<string, string, never>;
+  merchant_id: ColumnType<string, string, never>;
+  processor_account_id: ColumnType<string, string, never>;
+  provider_event_id: ColumnType<string, string, never>;
+  event_type: ColumnType<string, string, never>;
+  object_type: ColumnType<string | null, string | null, never>;
+  object_id: ColumnType<string | null, string | null, never>;
+  received_at: ColumnType<Date, Date, never>;
+  attempts: number;
+  outcome: 'PROCESSED' | 'IGNORED' | 'FAILED' | null;
+  detail: string | null;
+  processed_at: Date | null;
+}
+
+/** A `processor_events` row as selected. */
+export type ProcessorEventRow = Selectable<ProcessorEventsTable>;
+
 export interface DatabaseSchema {
   merchants: MerchantsTable;
   audit_events: AuditEventsTable;
@@ -369,6 +413,7 @@ export interface DatabaseSchema {
   ledger_accounts: LedgerAccountsTable;
   journal_entries: JournalEntriesTable;
   journal_lines: JournalLinesTable;
+  processor_events: ProcessorEventsTable;
 }
 
 /** The Kysely instance that every query and transaction goes through. */

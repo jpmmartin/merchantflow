@@ -240,3 +240,103 @@ export async function setDefaultProcessorAccount(
     `${merchantPath(merchantId)}/processor-accounts/${encodeURIComponent(processorAccountId)}/default`,
   )) as ProcessorAccount;
 }
+
+/**
+ * The webhook configuration of a processor account as the API returns it: the
+ * signing secret appears only as its last four characters.
+ */
+export interface ProcessorAccountWebhook {
+  readonly processor_account_id: string;
+  readonly merchant_id: string;
+  readonly provider: string;
+  /** Where the provider must deliver events; null without a public base URL. */
+  readonly endpoint_url: string | null;
+  readonly configured: boolean;
+  readonly mode: 'AUTOMATIC' | 'MANUAL' | null;
+  readonly signing_secret_hint: string | null;
+  readonly webhook_endpoint_id: string | null;
+  readonly configured_at: string | null;
+}
+
+/** The answer of a configuration: also what happened to a replaced endpoint. */
+export interface ConfiguredProcessorAccountWebhook extends ProcessorAccountWebhook {
+  readonly previous_endpoint: 'NONE' | 'DELETED' | 'NOT_DELETED';
+}
+
+/** A received webhook event, as the panel lists it. */
+export interface ProcessorEvent {
+  readonly id: string;
+  readonly provider_event_id: string;
+  readonly event_type: string;
+  readonly object_type: string | null;
+  readonly object_id: string | null;
+  readonly received_at: string;
+  readonly attempts: number;
+  readonly outcome: 'PROCESSED' | 'IGNORED' | 'FAILED' | null;
+  readonly detail: string | null;
+  readonly processed_at: string | null;
+}
+
+function webhookPath(merchantId: string, processorAccountId: string): string {
+  return `${merchantPath(merchantId)}/processor-accounts/${encodeURIComponent(processorAccountId)}/webhook`;
+}
+
+export async function getProcessorAccountWebhook(
+  merchantId: string,
+  processorAccountId: string,
+): Promise<ProcessorAccountWebhook> {
+  return (await apiRequest(
+    'GET',
+    webhookPath(merchantId, processorAccountId),
+  )) as ProcessorAccountWebhook;
+}
+
+/** Asks the API to create the endpoint in the Stripe account. */
+export async function configureWebhookAutomatically(
+  merchantId: string,
+  processorAccountId: string,
+): Promise<ConfiguredProcessorAccountWebhook> {
+  return (await apiRequest(
+    'POST',
+    webhookPath(merchantId, processorAccountId),
+    {
+      body: { mode: 'AUTOMATIC' },
+    },
+  )) as ConfiguredProcessorAccountWebhook;
+}
+
+/** Stores the signing secret of an endpoint created in the Stripe Dashboard. */
+export async function configureWebhookManually(
+  merchantId: string,
+  processorAccountId: string,
+  signingSecret: string,
+): Promise<ConfiguredProcessorAccountWebhook> {
+  return (await apiRequest(
+    'POST',
+    webhookPath(merchantId, processorAccountId),
+    {
+      body: { mode: 'MANUAL', signing_secret: signingSecret },
+    },
+  )) as ConfiguredProcessorAccountWebhook;
+}
+
+export async function removeProcessorAccountWebhook(
+  merchantId: string,
+  processorAccountId: string,
+): Promise<ProcessorAccountWebhook> {
+  return (await apiRequest(
+    'POST',
+    `${webhookPath(merchantId, processorAccountId)}/remove`,
+  )) as ProcessorAccountWebhook;
+}
+
+export async function listProcessorEvents(
+  merchantId: string,
+  processorAccountId: string,
+): Promise<readonly ProcessorEvent[]> {
+  const page = (await apiRequest(
+    'GET',
+    `${webhookPath(merchantId, processorAccountId)}/events`,
+  )) as { readonly data: readonly ProcessorEvent[] };
+  return page.data;
+}

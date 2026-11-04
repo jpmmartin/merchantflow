@@ -4,6 +4,7 @@ import {
   Controller,
   Get,
   Header,
+  HttpCode,
   Param,
   Post,
   Res,
@@ -26,23 +27,29 @@ import {
 import type { IdempotencyJsonObject } from '../../idempotency/application/idempotency-record.js';
 import { CorrelationId } from '../../logging/correlation-id.decorator.js';
 import { ListRefundsService } from '../application/list-refunds.service.js';
+import { RefreshRefundService } from '../application/refresh-refund.service.js';
 import { RefundPaymentIntentService } from '../application/refund-payment-intent.service.js';
 import {
   refundAmountMinorOf,
   toListRefundsApiException,
+  toRefreshRefundApiException,
   toRefundApiException,
 } from './payment-intent-failures.js';
 import { paymentIntentIdParamSchema } from './payment-intent.schemas.js';
 import {
   toRefundCreationResponse,
   toRefundListResponse,
+  toRefundRefreshResponse,
 } from './refund.presenter.js';
 import {
   createRefundSchema,
   refundCreationResponseSchema,
+  refundIdParamSchema,
   refundListResponseSchema,
+  refundRefreshResponseSchema,
   type CreateRefundBody,
   type RefundListResponse,
+  type RefundRefreshResponse,
 } from './refund.schemas.js';
 
 const RETRY_AFTER = {
@@ -60,6 +67,7 @@ export class PaymentRefundsController {
   constructor(
     private readonly refundPaymentIntent: RefundPaymentIntentService,
     private readonly listRefunds: ListRefundsService,
+    private readonly refreshRefund: RefreshRefundService,
   ) {}
 
   // The path names an intent and no merchant, so listing both merchant roles
@@ -72,7 +80,7 @@ export class PaymentRefundsController {
   @ApiOperation({
     summary: 'Refund a payment intent',
     description:
-      "Roles: MERCHANT_ADMIN of an ACTIVE merchant. Refunds part or all of a captured payment intent (SUCCEEDED or PARTIALLY_REFUNDED) through the processor account of its successful attempt, even if that account is no longer the default or is disabled. The amount is in minor units of the intent's currency and must be at most the refundable amount: the captured amount minus every refund that succeeded or is still executing, pending, or unknown; a larger amount is refused before the provider is called. The provider is called with no database transaction open, with the refund's operation ID as its idempotency key. 201 answers SUCCEEDED (the intent becomes PARTIALLY_REFUNDED or REFUNDED and the refund is posted to the ledger), PENDING (the provider has not finished; the intent and the ledger do not change and the amount stays reserved), or FAILED (no money was returned; the amount is released). 202 answers UNKNOWN: money may have been returned, the amount stays reserved, and no new refund of the intent is accepted until the outcome is resolved, which needs recovery that does not exist yet. The Idempotency-Key header is required: a 201 answer is stored and replayed for the same key and request, also after the merchant changed status; while the refund is EXECUTING or UNKNOWN the same key gets 409 OPERATION_IN_PROGRESS. A refused request stores nothing. The response is not cacheable (Cache-Control: no-store).",
+      "Roles: MERCHANT_ADMIN of an ACTIVE merchant. Refunds part or all of a captured payment intent (SUCCEEDED or PARTIALLY_REFUNDED) through the processor account of its successful attempt, even if that account is no longer the default or is disabled. The amount is in minor units of the intent's currency and must be at most the refundable amount: the captured amount minus every refund that succeeded or is still executing, pending, or unknown; a larger amount is refused before the provider is called. The provider is called with no database transaction open, with the refund's operation ID as its idempotency key. 201 answers SUCCEEDED (the intent becomes PARTIALLY_REFUNDED or REFUNDED and the refund is posted to the ledger), PENDING (the provider has not finished; the intent and the ledger do not change and the amount stays reserved), or FAILED (no money was returned; the amount is released). 202 answers UNKNOWN: money may have been returned, the amount stays reserved, and no new refund of the intent is accepted until the outcome is resolved by the account's webhook (or by the refund check once Stripe has identified the refund). A PENDING refund is resolved the same way. The Idempotency-Key header is required: a 201 answer is stored and replayed for the same key and request, also after the merchant changed status; while the refund is EXECUTING or UNKNOWN the same key gets 409 OPERATION_IN_PROGRESS. A refused request stores nothing. The response is not cacheable (Cache-Control: no-store).",
   })
   @ApiHeader({
     name: IDEMPOTENCY_KEY_HEADER,
@@ -218,5 +226,72 @@ export class PaymentRefundsController {
     });
     if (!result.ok) throw toListRefundsApiException(result.code);
     return toRefundListResponse(result.intent, result.refunds, result.summary);
+  }
+
+  // As for the list: both merchant roles pass the guard so that another
+  // merchant's intent is 404 from the use case; MERCHANT_READ_ONLY gets 403
+  // for its own, and a platform key is 403 for every id.
+  @Post(':id/refunds/:refundId/refresh')
+  @HttpCode(200)
+  @Roles(['MERCHANT_ADMIN', 'MERCHANT_READ_ONLY'])
+  @Header('Cache-Control', 'no-store')
+  @ApiOperation({
+    summary: 'Check a refund with the processor',
+    description:
+      "Roles: MERCHANT_ADMIN of the intent's merchant. Reads the refund from Stripe with no database transaction open and applies what Stripe reports with the same rules as the webhook: a PENDING or UNKNOWN refund moves to SUCCEEDED (the intent becomes PARTIALLY_REFUNDED or REFUNDED and the refund is posted) or FAILED (its amount is refundable again), an UNKNOWN refund may turn out PENDING, and a SUCCEEDED refund that Stripe failed afterwards becomes FAILED with a compensating ledger entry and the intent moved back to PARTIALLY_REFUNDED or SUCCEEDED. No status moves backwards. It needs no Idempotency-Key and is safe to repeat: a refund Stripe confirms changes nothing (change null). The merchant's status is not checked: recording an outcome moves no new money.",
+  })
+  @ApiResponse({
+    status: 200,
+    description:
+      'The refund and its intent after the check, with the refunded and refundable amounts, and what changed.',
+    standardSchema: refundRefreshResponseSchema,
+  })
+  @ApiErrorResponses(
+    {
+      status: 400,
+      description:
+        'VALIDATION_FAILED: an id is not a UUID. The answer does not depend on any merchant.',
+    },
+    {
+      status: 401,
+      description:
+        'UNAUTHENTICATED: the API key or session token is missing, malformed, unknown, wrong, revoked, or expired.',
+    },
+    {
+      status: 403,
+      description:
+        'INSUFFICIENT_ROLE: only MERCHANT_ADMIN may check a refund; a platform key is refused for every id.',
+    },
+    {
+      status: 404,
+      description:
+        'NOT_FOUND: the intent does not exist or belongs to another merchant, or the refund is not one of its refunds. The cases cannot be told apart.',
+    },
+    {
+      status: 409,
+      description:
+        'REFUND_NOT_REFRESHABLE: the refund is still EXECUTING, or Stripe never identified it (an UNKNOWN refund without a re_ ID, which only its webhook can resolve).',
+    },
+    {
+      status: 503,
+      description:
+        'PROCESSOR_LOOKUP_UNAVAILABLE: Stripe gave no usable answer. OPERATION_TIMEOUT: another change of the intent held its lock too long. CREDENTIALS_KEY_NOT_CONFIGURED: no master key. Nothing was changed; the request can be sent again.',
+    },
+  )
+  async refresh(
+    @CurrentPrincipal() principal: Principal,
+    @CorrelationId() correlationId: string,
+    @Param('id', { schema: paymentIntentIdParamSchema }) id: string,
+    @Param('refundId', { schema: refundIdParamSchema }) refundId: string,
+  ): Promise<RefundRefreshResponse> {
+    const result = await this.refreshRefund.execute({
+      principal,
+      correlationId,
+      paymentIntentId: id,
+      refundId,
+      present: toRefundCreationResponse,
+    });
+    if (!result.ok) throw toRefreshRefundApiException(result.code);
+    return toRefundRefreshResponse(result.view, result.change);
   }
 }

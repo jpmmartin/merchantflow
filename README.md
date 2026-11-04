@@ -23,12 +23,13 @@ Today the repository contains the runnable foundation only:
 - payment intent retrieval, `GET /api/v1/payment-intents/{id}`, and listing, `GET /api/v1/payment-intents`, newest first with stable pagination and a status filter, both scoped to the merchant of the key (see Payment intents);
 - payment confirmation through Stripe in test mode, `POST /api/v1/payment-intents/{id}/confirm`, with a required `Idempotency-Key`, the merchant's default Stripe account, and no database transaction open during the Stripe call; 3D Secure completion, `POST /api/v1/payment-intents/{id}/complete-action`; and the attempt history, `GET /api/v1/payment-intents/{id}/attempts` (see Confirming a payment intent);
 - refunds through Stripe in test mode, full or partial, `POST /api/v1/payment-intents/{id}/refunds` with a required `Idempotency-Key`, through the Stripe account that captured the payment, and the refund list, `GET /api/v1/payment-intents/{id}/refunds` (see Refunding a payment intent);
+- Stripe webhooks per processor account: `POST /api/v1/webhooks/stripe/{processorAccountId}`, public and authenticated only by the signature, with an inbox of received events; a refund that Stripe finishes or fails later, and a payment left in `REQUIRES_ACTION` or `UNKNOWN`, are brought up to date from Stripe; the webhook of each account is configured automatically in the merchant's own Stripe account or with a pasted signing secret; `POST /api/v1/payment-intents/{id}/refunds/{refundId}/refresh` checks one refund without a webhook; and an optional ngrok service exposes only the webhook route in local work (see Stripe webhooks);
 - a double-entry merchant ledger: each successful payment and each successful refund posts one balanced, immutable journal entry in the same transaction that records the success, and `GET /api/v1/merchants/{id}/ledger/balances`, `.../ledger/journal-entries`, and `.../ledger/journal-entries/{journalEntryId}` read the accounts with their balances and the entries (see Ledger);
 - a development seed, `pnpm db:seed`, that creates the first platform administrator key and the platform administrator user (see Demonstration: two merchants, neither sees the other, and Web frontend);
 - linting, formatting, type checking, unit tests, and integration tests against a real PostgreSQL started with Testcontainers, including an HTTP concurrency suite (`tests/concurrency`) that sends 50 simultaneous requests to the listening API and checks that duplicates create one intent;
 - a GitHub Actions workflow that runs the same checks.
 
-Recovery of payments with an unknown outcome, the simulated processor, processor fees, settlements and payouts in the ledger, capture and void, the resolution of pending refunds, Stripe webhooks, and every other business capability are planned and do not exist yet.
+Automatic recovery of payments and refunds with an unknown outcome (beyond what a webhook or a refund check resolves), the simulated processor, processor fees, settlements and payouts in the ledger, capture and void, and every other business capability are planned and do not exist yet.
 
 ## Prerequisites
 
@@ -334,6 +335,67 @@ The answer is `{"refund": {...}, "payment_intent": {...}}`: the refund (`id`, `p
 
 `GET /api/v1/payment-intents/{id}/refunds` (`MERCHANT_ADMIN` and `MERCHANT_READ_ONLY`) returns the intent's `captured_amount_minor`, `refunded_amount_minor`, `pending_amount_minor`, and `refundable_amount_minor` as integer strings, and its refunds oldest first in `data`. Another merchant's intent is `404` on both routes. In Stripe, the refunds appear on the payment's page in the Dashboard.
 
+## Stripe webhooks
+
+Stripe tells each merchant's account about payments and refunds that end after MerchantFlow's own call, such as a refund that stays `pending` for a while or a refund that Stripe reports as succeeded and fails later. Each processor account has **its own** webhook endpoint in the merchant's own Stripe account, signed with **its own** secret.
+
+### Configuring the webhook of an account
+
+The endpoint URL of an account is `<PUBLIC_API_BASE_URL>/api/v1/webhooks/stripe/<processor account id>`. `PUBLIC_API_BASE_URL` comes from the configuration (see Configuration); in local work it is your ngrok dev domain (see Local delivery with ngrok).
+
+All routes are below `/api/v1/merchants/{id}/processor-accounts/{processorAccountId}/webhook`, for `PLATFORM_ADMIN` (any merchant) and `MERCHANT_ADMIN` (its own); `MERCHANT_READ_ONLY` can read; another merchant is `404`.
+
+- `GET .../webhook`: `endpoint_url` (`null` without a public base URL), `configured`, `mode` (`AUTOMATIC` or `MANUAL`), `signing_secret_hint` (last four characters), `webhook_endpoint_id` (Stripe's `we_` ID when MerchantFlow created it), and `configured_at`. No answer ever contains the signing secret.
+- `POST .../webhook` with `{"mode": "AUTOMATIC"}` creates the endpoint in the merchant's Stripe account with the account's secret key, for the URL above, the events `payment_intent.succeeded`, `payment_intent.payment_failed`, `refund.updated`, and `refund.failed`, and the API version of the pinned Stripe SDK, and stores the signing secret that Stripe returns only at creation. Without a public base URL the answer is `503 PUBLIC_BASE_URL_NOT_CONFIGURED`; Stripe refusing the key is `422 PROCESSOR_CREDENTIALS_INVALID`, refusing the endpoint `422 WEBHOOK_ENDPOINT_REJECTED`, and not answering `503 WEBHOOK_PROVIDER_UNAVAILABLE`.
+- `POST .../webhook` with `{"mode": "MANUAL", "signing_secret": "whsec_..."}` stores the secret of an endpoint you created yourself in the Stripe Dashboard (with the URL and the four events above). Only `whsec_` secrets are accepted.
+- Either replaces the previous configuration. An endpoint MerchantFlow created before is then deleted in Stripe; `previous_endpoint` says `DELETED`, `NONE`, or `NOT_DELETED` (Stripe did not answer; delete it in the Dashboard, its deliveries are refused anyway).
+- `POST .../webhook/remove` deletes the endpoint MerchantFlow created in Stripe (one that no longer exists counts as deleted) and clears the secret; later deliveries are refused.
+- `GET .../webhook/events`: the latest 20 events received for the account, newest first, with `event_type`, `object_id`, `received_at`, `outcome`, `detail`, and `attempts`.
+
+The signing secret is stored encrypted with AES-256-GCM under `CREDENTIALS_MASTER_KEY`, bound to its account, and is never logged or returned. Each change writes a `PROCESSOR_ACCOUNT_WEBHOOK_CONFIGURED` or `PROCESSOR_ACCOUNT_WEBHOOK_REMOVED` audit event without the secret.
+
+### Receiving events
+
+`POST /api/v1/webhooks/stripe/{processorAccountId}` is public: Stripe sends no API key, so the `Stripe-Signature` header, verified on the raw body with the account's secret and Stripe's default tolerance of 300 seconds, is the only authentication. The raw body is kept for this route only; every other route parses JSON as before.
+
+- An unknown account, a disabled account, an account without a secret, a missing or bad signature, and a live-mode event all get the same `400 WEBHOOK_REJECTED`.
+- A verified event is stored first in the inbox (`processor_events`), unique per account and Stripe event ID, with its type, object, reception time, number of runs, outcome, and processing time. No payload, signature, or secret is stored.
+- **Redelivery rule:** an event already `PROCESSED` or `IGNORED` is acknowledged again with `200` and changes nothing. An event whose processing `FAILED` (Stripe unreachable, or the payment or refund's own request still running) answers `503 WEBHOOK_PROCESSING_FAILED`, so Stripe delivers it again, and it is processed again then.
+- **Processing:** the event is only a trigger. The refund or payment it names is read from Stripe (at most 5 seconds, no retry) and applied with the same conditional updates and transition rules as the API, so a late, repeated, or out-of-order event cannot move a status backwards. A delivery is answered within about six seconds.
+  - `refund.updated` and `refund.failed`: a `PENDING` or `UNKNOWN` refund becomes `SUCCEEDED` (the intent becomes `PARTIALLY_REFUNDED` or `REFUNDED`, and the refund entry is posted) or `FAILED` (its amount can be refunded again). A refund is matched by its `re_` ID or, if it never learned it, by the `refund_id` metadata MerchantFlow sent.
+  - `payment_intent.succeeded` and `payment_intent.payment_failed`: a payment in `REQUIRES_ACTION` or `UNKNOWN` is resolved as `complete-action` does, and its confirmation's `Idempotency-Key` then replays the final answer. A payment is matched by its `pi_` ID or by the `payment_attempt_id` metadata.
+  - Other types, and objects MerchantFlow did not create, are recorded as `IGNORED`.
+- Changes made by a webhook are audited with the actor `SYSTEM` / `processor-webhook`.
+
+### A refund that fails after it succeeded
+
+When Stripe fails a refund it had reported as succeeded (`refund.failed`), the refund becomes `FAILED`, a compensating ledger entry reverses its posting (debit `1100`, credit `4100`, source `PAYMENT_REFUND_REVERSAL` with the refund's ID, posted once), the intent moves back to `PARTIALLY_REFUNDED` or `SUCCEEDED` according to the refunds that still succeeded, and the amount is refundable again. The original entry is never changed.
+
+### Checking a refund without a webhook
+
+`POST /api/v1/payment-intents/{id}/refunds/{refundId}/refresh` (`MERCHANT_ADMIN`) reads the refund from Stripe and applies it with the same code as the webhook. It is safe to repeat; `change` says what happened (`REFUND_SUCCEEDED`, `REFUND_FAILED`, `REFUND_PENDING`, `REFUND_REVERSED`, or `null` when Stripe confirms the current status). A refund still `EXECUTING`, or one Stripe never identified, is `409 REFUND_NOT_REFRESHABLE`; Stripe unreachable is `503 PROCESSOR_LOOKUP_UNAVAILABLE`.
+
+### Local delivery with ngrok
+
+Stripe cannot reach `localhost`, so local work exposes the API through ngrok, with a traffic policy ([`ngrok/traffic-policy.yml`](ngrok/traffic-policy.yml)) that denies every request except `POST` to `/api/v1/webhooks/stripe/`: sign-in, merchants, payments, the health probes, and the documentation never become public.
+
+1. Create a free account at <https://ngrok.com>. In the ngrok dashboard, copy your authtoken (**Getting Started**, **Your Authtoken**) and your free dev domain (**Domains**, for example `example-name.ngrok-free.app`). The dev domain does not change, so endpoints registered in Stripe stay valid across restarts.
+2. In the repository-root `.env`, set `NGROK_AUTHTOKEN` and `NGROK_DOMAIN` (the domain without `https://`). Compose then passes `PUBLIC_API_BASE_URL=https://<NGROK_DOMAIN>` to the `dev` service.
+3. Recreate `dev` and start the tunnel, then start the API (this stops anything running inside `dev`):
+
+   ```bash
+   docker compose --profile webhooks up -d
+   ```
+
+   ```bash
+   docker compose exec dev pnpm dev
+   ```
+
+4. The ngrok inspection UI is at <http://127.0.0.1:4040> (published on the loopback only). `docker compose --profile webhooks stop ngrok` stops the tunnel.
+5. Sign in to the web frontend as a merchant user, open **My merchant**, and in **Webhooks** click **Configure webhook** for each Stripe account (sandbox A on one merchant, sandbox B on another). In each Stripe sandbox, the endpoint and its deliveries are under **Developers**, **Webhooks** (Workbench), with the URL shown in the panel.
+
+The `ngrok` service uses the official `ngrok/ngrok` image at an exact version, under the Compose profile `webhooks`, so `docker compose up -d` alone does not start it.
+
 ## Ledger
 
 Each merchant has a double-entry payments ledger. It records the merchant's side of its own Stripe account: the funds go from Stripe to the merchant, and MerchantFlow never holds them or owes them.
@@ -350,7 +412,9 @@ Each merchant has a double-entry payments ledger. It records the merchant's side
 
 **Refund posting.** A refund that Stripe reports as succeeded posts one entry in the transaction that records it: debit `4100` Refunds, credit `1100` Processor receivable, by the refunded amount. Its source is `PAYMENT_REFUND` with the refund's ID, so a refund can never post twice; a pending, failed, or unknown refund posts nothing.
 
-**Not recorded yet:** processor fees (Stripe reports them later), Stripe settlements and payouts to the merchant's bank, refunds that Stripe completes or fails later (no webhook yet), and disputes.
+**Refund reversal.** A refund that Stripe fails after it had succeeded posts the reverse entry: debit `1100`, credit `4100`, source `PAYMENT_REFUND_REVERSAL` with the refund's ID, once (see Stripe webhooks). A pending refund that succeeds later posts its refund entry when the webhook or a refund check applies it.
+
+**Not recorded yet:** processor fees (Stripe reports them later), Stripe settlements and payouts to the merchant's bank, and disputes.
 
 **Payments that succeeded before the ledger existed** have no entry until you run:
 
@@ -479,7 +543,7 @@ Alternatively, `docker compose down --volumes` followed by the Quick start gives
 
 - sign-in and sign-out, and an Account page with the signed-in user and role from `GET /auth/me`;
 - for the platform administrator: the merchants list (`/merchants`, with **Load more** for the next page), the create form (`/merchants/new`), the activate, suspend, and reactivate buttons the current status allows, and each merchant's page (`/merchants/{id}`);
-- on a merchant's page: its users (create, list, disable with a confirmation), its API keys (issue with a merchant role, list, revoke with a confirmation), and its processor accounts (connect a Stripe test account with both keys, list with the secret key's last four characters, make one the default, disable with a confirmation). A new user's password and a new key are shown once, with a copy button, and are forgotten when their dialog closes; the Stripe secret key field is a password field, cleared as soon as the form is submitted;
+- on a merchant's page: its users (create, list, disable with a confirmation), its API keys (issue with a merchant role, list, revoke with a confirmation), and its processor accounts (connect a Stripe test account with both keys, list with the secret key's last four characters, make one the default, disable with a confirmation), with a **Webhooks** panel per account: the endpoint URL with a copy button, **Configure webhook** (then replace or remove, each confirmed), a password field for a signing secret pasted from the Stripe Dashboard (cleared as soon as it is submitted), the secret's last four characters, the mode and time of the configuration, and the latest events received with their type, time, and outcome. A new user's password and a new key are shown once, with a copy button, and are forgotten when their dialog closes; the Stripe secret key field is a password field, cleared as soon as the form is submitted;
 - for a merchant user: only its own merchant's page, where it lands after sign-in, with no merchant list and no status buttons. Any other merchant's page shows the API's `404`;
 - for a merchant user, a **Payments** section (the platform administrator does not have it, because the payment endpoints refuse platform roles):
   - the list (`/payments`): reference, amount, currency, status, and creation time, newest first, a status filter kept in the URL (`/payments?status=CREATED`), **Load more** for the next page, and a click on a row to open the order;
@@ -488,7 +552,7 @@ Alternatively, `docker compose down --volumes` followed by the Quick start gives
   - on a `CREATED` order, for `MERCHANT_ADMIN`, **Pay with a card**: Stripe's card field (Stripe Elements) loaded with the publishable key of the merchant's enabled default account, a list of Stripe test cards, and **Pay**. Stripe.js turns the card into a payment method in the browser and only its `pm_` ID reaches the API. 3D Secure opens Stripe's challenge in the page and the result is applied right after. The page then shows the outcome: success, a decline with its code and "try another card", or an unknown outcome with a warning not to pay again. Without an enabled default account the section links to the merchant's processor accounts;
   - on a `REQUIRES_ACTION` order, **Continue authentication** opens the 3D Secure challenge again, for example after a reload;
   - on a `SUCCEEDED` or `PARTIALLY_REFUNDED` order, for `MERCHANT_ADMIN`, **Refund**: the amount is typed in major units and defaults to the remaining refundable amount (a full refund; **Full remaining** restores it), and a smaller amount is a partial refund. One `Idempotency-Key` per refund: after a network error, `OPERATION_IN_PROGRESS`, a `503`, or a server error, **Send the same refund again** reuses it; any other answer or a different amount starts a new one. The outcome (succeeded, pending, failed, unknown) and errors with their code and correlation ID are shown;
-  - on every order's page, its **Refunds**: the captured, refunded, pending, and remaining amounts, and a table with each refund's amount, status, Stripe `re_` ID, account, failure, and times;
+  - on every order's page, its **Refunds**: the captured, refunded, pending, and remaining amounts, and a table with each refund's amount, status, Stripe `re_` ID, account, failure, and times; for `MERCHANT_ADMIN`, each `PENDING` or `UNKNOWN` refund has **Check with Stripe**, which applies what Stripe reports and reloads the page;
   - on every order's page, its **Journal entries** with their debit and credit lines;
 - a **Ledger** page per merchant (`/merchants/{id}/ledger`): for a merchant user under **Ledger** in the navigation bar, for the platform administrator through the **Ledger** button of each merchant's page. It shows the accounts with code, name, classification, normal side, currency, debit and credit totals, and balance, and the journal entries newest first with **Load more**.
 
@@ -573,6 +637,8 @@ The API reads its configuration from environment variables and refuses to start,
 | `SEED_ADMIN_EMAIL` | `admin@merchantflow.test` | Email of the platform administrator user created by `pnpm db:seed` |
 | `VITE_API_BASE_URL` | `http://localhost:3000/api/v1` | API base URL the web frontend calls; read by Vite, not by the API |
 | `CREDENTIALS_MASTER_KEY` | none | 32 random bytes in standard base64 that encrypt processor secret keys; a secret. Unset: development and test start, and connecting an account answers `503`; production does not start. An invalid value stops startup |
+| `PUBLIC_API_BASE_URL` | none | Public base URL of the API (`scheme://host[:port]`, no path) where Stripe delivers webhooks. Compose sets `https://<NGROK_DOMAIN>` for `dev` when `NGROK_DOMAIN` is set. Unset: the automatic webhook configuration answers `503 PUBLIC_BASE_URL_NOT_CONFIGURED` |
+| `NGROK_AUTHTOKEN`, `NGROK_DOMAIN` | none | Authtoken (a secret) and free dev domain (without `https://`) of your ngrok account, for the `webhooks` Compose profile; the API never reads them |
 | `STRIPE_TEST_A_SECRET_KEY`, `STRIPE_TEST_A_PUBLISHABLE_KEY`, `STRIPE_TEST_B_SECRET_KEY`, `STRIPE_TEST_B_PUBLISHABLE_KEY` | none | Test keys of two of your Stripe sandboxes, A and B, for manual checks only (two sandboxes let you move the default between real accounts); the API never reads them |
 
 [`.env.example`](.env.example) is the reference for every variable. Docker Compose already sets `HOST` and `DATABASE_URL` for the `dev` container, so the quick start needs no `.env` file.
@@ -591,8 +657,8 @@ Keep it: losing it makes every stored secret key unreadable, and the accounts mu
 - No rate limit or input size limit beyond the parser's default exists yet, sign-in included. There is no password reset, email verification, or multi-factor authentication.
 - Every merchant user is `MERCHANT_ADMIN`; there is no role choice, re-enabling, password change, or deletion of users yet, and the lists of a merchant's users and keys are not paginated. Platform users are created only by the seed. Only payment intent creation and confirmation take an idempotency key: creating a merchant twice creates two merchants.
 - **A payment whose outcome is unknown stays blocked.** Automatic recovery does not exist yet: a crash of the API while it waits for Stripe, a failure to record Stripe's answer, or an `UNKNOWN` result (a timeout, a connection error, a Stripe server error) leaves the attempt `EXECUTING` or `UNKNOWN` and the intent `PROCESSING` or `UNKNOWN`, and no new attempt is accepted for it until recovery exists. Check such a payment in the Stripe Dashboard by its metadata. A payment left in `REQUIRES_ACTION` also blocks new attempts until the customer completes or fails the challenge.
-- Payments use Stripe in test mode and cards only, with automatic capture; there is no manual capture, void, or webhook yet. A refund that Stripe leaves `pending` stays `PENDING` with its amount reserved, and a refund whose outcome is unknown stays `UNKNOWN` and blocks new refunds of its payment, until webhooks or recovery exist; a refund that Stripe first reports as succeeded and fails later is not learned. The ledger records captured sales and successful refunds: no processor fee, settlement, or payout, and a payment that succeeded before the ledger existed has no entry until `pnpm db:backfill-ledger` runs. Its tables reject changes through triggers that a database superuser or the table owner can still disable. Stripe's PaymentIntent amount limit (99,999,999 minor units) is refused before any call, as a `FAILED` attempt.
-- Idempotency records are kept and never deleted (no purge exists). `payment_intents`, `payment_attempts`, and `refunds` reject deletes, and changes of an intent's amount, currency, reference, or merchant, of a finished attempt, or of a finished refund, through triggers that a database superuser or the table owner can still disable.
+- Payments use Stripe in test mode and cards only, with automatic capture; there is no manual capture or void yet. A refund that Stripe leaves `pending` stays `PENDING` with its amount reserved until a webhook or **Check with Stripe** resolves it. A refund or payment whose outcome is unknown and that never learned its Stripe ID can only be resolved by a webhook that names it; nothing looks it up on its own. Webhooks are processed synchronously in the request (no outbox or worker), and an event Stripe stops redelivering after its retries is not fetched again: use the refund check. The ledger records captured sales and successful refunds: no processor fee, settlement, or payout, and a payment that succeeded before the ledger existed has no entry until `pnpm db:backfill-ledger` runs. Its tables reject changes through triggers that a database superuser or the table owner can still disable. Stripe's PaymentIntent amount limit (99,999,999 minor units) is refused before any call, as a `FAILED` attempt.
+- Idempotency records are kept and never deleted (no purge exists). `payment_intents`, `payment_attempts`, `refunds`, and `processor_events` reject deletes, and changes of an intent's amount, currency, reference, or merchant, of a finished attempt, of a failed refund, of a succeeded refund except to fail, or of a processed event, through triggers that a database superuser or the table owner can still disable.
 - The other business endpoints are the merchant endpoints: no platform key can be issued through the API; the development seed is the only way to create one, and a lost platform key is replaced by revoking it in the database (see Recover a lost platform key). The simulated processor and dashboard are planned.
 - The error responses of the health endpoints and of the unknown-route handler are not described in the OpenAPI document.
 - A merchant or payment intent created by a transaction that commits late can be missed by a list walk already past its position; the next walk shows it.

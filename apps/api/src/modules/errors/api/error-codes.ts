@@ -41,6 +41,13 @@ export const ERROR_CODES = [
   'PAYMENT_INTENT_NOT_REFUNDABLE',
   'REFUND_AMOUNT_EXCEEDS_REFUNDABLE',
   'REFUND_OUTCOME_UNKNOWN',
+  'PUBLIC_BASE_URL_NOT_CONFIGURED',
+  'WEBHOOK_ENDPOINT_REJECTED',
+  'WEBHOOK_PROVIDER_UNAVAILABLE',
+  'WEBHOOK_CONFIGURATION_CHANGED',
+  'WEBHOOK_REJECTED',
+  'WEBHOOK_PROCESSING_FAILED',
+  'REFUND_NOT_REFRESHABLE',
   'PAYLOAD_TOO_LARGE',
   'UNSUPPORTED_MEDIA_TYPE',
   'REQUEST_REJECTED',
@@ -291,6 +298,52 @@ export const ERROR_DEFINITIONS: Readonly<Record<ErrorCode, ErrorDefinition>> = {
     status: 409,
     message:
       'An earlier refund of this payment has an unknown outcome; do not refund again until it is resolved.',
+  },
+  // The API has no public base URL (PUBLIC_API_BASE_URL), so no webhook
+  // endpoint can be registered at a provider.
+  PUBLIC_BASE_URL_NOT_CONFIGURED: {
+    status: 503,
+    message:
+      'Webhooks cannot be configured automatically until the public base URL of the API is configured.',
+  },
+  // The provider refused to create the webhook endpoint, for example because
+  // of its URL. Nothing was stored.
+  WEBHOOK_ENDPOINT_REJECTED: {
+    status: 422,
+    message: 'The processor refused the webhook endpoint. Nothing was stored.',
+  },
+  // The provider gave no usable answer while a webhook endpoint was created or
+  // deleted. The configuration was not changed.
+  WEBHOOK_PROVIDER_UNAVAILABLE: {
+    status: 503,
+    message:
+      'The processor did not confirm the webhook change. The configuration was not changed; retry later.',
+  },
+  // Another change of the same webhook configuration was stored first.
+  WEBHOOK_CONFIGURATION_CHANGED: {
+    status: 409,
+    message:
+      'The webhook configuration changed while this request ran. Nothing was stored; read it again.',
+  },
+  // A webhook delivery that cannot be verified: the same answer whatever the
+  // reason, so it reveals nothing about the account or the signature.
+  WEBHOOK_REJECTED: {
+    status: 400,
+    message: 'The webhook request was rejected.',
+  },
+  // A verified event was stored but could not be processed yet; the provider
+  // delivers it again later, and it is processed then.
+  WEBHOOK_PROCESSING_FAILED: {
+    status: 503,
+    message:
+      'The event was received but not processed. Deliver it again later.',
+  },
+  // The refund cannot be checked with the processor: it is still executing,
+  // or the processor never identified it.
+  REFUND_NOT_REFRESHABLE: {
+    status: 409,
+    message:
+      'The refund cannot be checked with the processor yet: it is still executing or has no processor identifier.',
   },
   PAYLOAD_TOO_LARGE: {
     status: 413,

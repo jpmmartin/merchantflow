@@ -43,6 +43,8 @@ export type {
   PaymentIntentsTable,
   ProcessorAccountRow,
   ProcessorAccountsTable,
+  ProcessorEventRow,
+  ProcessorEventsTable,
   RefundRow,
   RefundsTable,
   UserRow,

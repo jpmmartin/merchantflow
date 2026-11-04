@@ -2,7 +2,10 @@ import type { Database } from '@merchantflow/database';
 import type { ProcessorAdapterRegistry } from '@merchantflow/processor-contracts';
 import { Inject, Injectable } from '@nestjs/common';
 import { PinoLogger } from 'nestjs-pino';
-import type { Principal } from '../../auth/application/principal.js';
+import {
+  auditActorOf,
+  type Principal,
+} from '../../auth/application/principal.js';
 import { DATABASE } from '../../database/database.module.js';
 import type { IdempotentResponse } from '../../idempotency/application/idempotency-record.js';
 import { ProcessorAccountsForPaymentsService } from '../../merchants/application/processor-accounts-for-payments.service.js';
@@ -168,7 +171,7 @@ export class CompletePaymentActionService {
       .setIsolationLevel('read committed')
       .execute((trx) =>
         this.applyResolution.execute(trx, {
-          principal,
+          actor: auditActorOf(principal),
           correlationId: command.correlationId,
           intent,
           attempt,

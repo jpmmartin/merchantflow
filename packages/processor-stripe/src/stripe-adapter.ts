@@ -1,14 +1,22 @@
 import type {
+  CreateWebhookEndpointInput,
   CredentialValidationResult,
+  DeleteWebhookEndpointInput,
+  GetRefundInput,
   GetTransactionInput,
   ProcessorAdapter,
   ProcessorCapability,
   ProcessorCredentials,
   ProcessorPaymentResult,
+  ProcessorRefundLookup,
   ProcessorRefundResult,
   ProcessorTransactionLookup,
   RefundInput,
   SaleInput,
+  VerifyWebhookEventInput,
+  WebhookEndpointCreation,
+  WebhookEndpointDeletion,
+  WebhookEventVerification,
 } from '@merchantflow/processor-contracts';
 import Stripe from 'stripe';
 import { toStripeAmount } from './stripe-amount.js';
@@ -21,7 +29,12 @@ import {
   refundErrorResult,
   refundResult,
   saleErrorResult,
+  unavailableCategoryOf,
 } from './stripe-results.js';
+import {
+  STRIPE_WEBHOOK_EVENT_TYPES,
+  verifyStripeWebhook,
+} from './stripe-webhooks.js';
 
 /** Provider code of the Stripe adapter. */
 export const STRIPE_PROVIDER = 'stripe';
@@ -65,6 +78,22 @@ const SALE_MAX_NETWORK_RETRIES = 2;
 const REFUND_MAX_NETWORK_RETRIES = 2;
 
 /**
+ * Automatic retries of a webhook endpoint creation. Every try sends the
+ * request's operation ID as the same `Idempotency-Key`, so a retry cannot
+ * create a second endpoint.
+ */
+const WEBHOOK_ENDPOINT_MAX_NETWORK_RETRIES = 1;
+
+/** A Refund ID: `re_` for cards, `pyr_` for some other payment methods. */
+const REFUND_ID = /^(re|pyr)_[A-Za-z0-9_]{1,240}$/;
+
+/** A webhook endpoint ID, such as `we_1Q...`. */
+const WEBHOOK_ENDPOINT_ID = /^we_[A-Za-z0-9_]{1,240}$/;
+
+/** A webhook signing secret, such as `whsec_...`. */
+const WEBHOOK_SIGNING_SECRET = /^whsec_[A-Za-z0-9+/=_-]{1,249}$/;
+
+/**
  * Stripe behind the processor port. The adapter holds no credentials: every
  * call builds a client from the keys of the one account it acts for, and the
  * client is dropped when the call returns. No Stripe type leaves this package,
@@ -80,6 +109,7 @@ export class StripeAdapter implements ProcessorAdapter {
     'PARTIAL_REFUND',
     'TRANSACTION_LOOKUP',
     'PROVIDER_IDEMPOTENCY',
+    'WEBHOOKS',
   ]);
   private readonly timeoutMs: number;
   private readonly saleTimeoutMs: number;
@@ -87,6 +117,19 @@ export class StripeAdapter implements ProcessorAdapter {
   constructor(options: StripeAdapterOptions = {}) {
     this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     this.saleTimeoutMs = options.saleTimeoutMs ?? DEFAULT_SALE_TIMEOUT_MS;
+  }
+
+  /**
+   * The settings of a read: the adapter's timeout with one retry, or, when
+   * the caller bounds the read, that bound and no retry.
+   */
+  private readSettings(timeoutMs: number | undefined): {
+    readonly timeout: number;
+    readonly maxNetworkRetries: number;
+  } {
+    return timeoutMs === undefined
+      ? { timeout: this.timeoutMs, maxNetworkRetries: READ_MAX_NETWORK_RETRIES }
+      : { timeout: timeoutMs, maxNetworkRetries: 0 };
   }
 
   /** A client for one account's secret key, dropped when the call returns. */
@@ -196,7 +239,7 @@ export class StripeAdapter implements ProcessorAdapter {
   /**
    * Retrieves one PaymentIntent by its ID (`GET /v1/payment_intents/:id`), a
    * read that changes nothing. A PaymentIntent in live mode is refused as an
-   * unusable answer.
+   * unusable answer. A caller's `timeoutMs` bounds the read, with no retry.
    */
   async getTransaction(
     input: GetTransactionInput,
@@ -207,10 +250,10 @@ export class StripeAdapter implements ProcessorAdapter {
     if (!PAYMENT_INTENT_ID.test(input.providerTransactionId)) {
       return { outcome: 'unavailable', category: 'INVALID_REQUEST' };
     }
-    const client = this.client(input.credentials.secretKey, {
-      timeout: this.timeoutMs,
-      maxNetworkRetries: READ_MAX_NETWORK_RETRIES,
-    });
+    const client = this.client(
+      input.credentials.secretKey,
+      this.readSettings(input.timeoutMs),
+    );
     let intent: Stripe.PaymentIntent;
     try {
       intent = await client.paymentIntents.retrieve(
@@ -283,6 +326,153 @@ export class StripeAdapter implements ProcessorAdapter {
       amount: amount.amount,
       currency: amount.currency,
     });
+  }
+
+  /**
+   * Retrieves one Refund by its ID (`GET /v1/refunds/:id`) with its
+   * PaymentIntent expanded, a read that changes nothing, and normalizes it as
+   * a refund result: the expanded PaymentIntent gives the mode, and a refund in
+   * live mode, of another PaymentIntent, or of another amount or currency than
+   * the platform's refund is `unknown`. A caller's `timeoutMs` bounds the
+   * read, with no retry.
+   */
+  async getRefund(input: GetRefundInput): Promise<ProcessorRefundLookup> {
+    if (checkStripeKey(input.credentials.secretKey, 'secret') !== undefined) {
+      return { outcome: 'unavailable', category: 'CONFIGURATION' };
+    }
+    const amount = toStripeAmount(input.amount);
+    if (
+      !REFUND_ID.test(input.providerRefundId) ||
+      !PAYMENT_INTENT_ID.test(input.providerTransactionId) ||
+      !amount.ok
+    ) {
+      return { outcome: 'unavailable', category: 'INVALID_REQUEST' };
+    }
+    const client = this.client(
+      input.credentials.secretKey,
+      this.readSettings(input.timeoutMs),
+    );
+    let refund: Stripe.Refund;
+    try {
+      refund = await client.refunds.retrieve(input.providerRefundId, {
+        expand: ['payment_intent'],
+      });
+    } catch (error) {
+      return { outcome: 'unavailable', category: unavailableCategoryOf(error) };
+    }
+    return {
+      outcome: 'found',
+      result: refundResult(refund, {
+        paymentIntentId: input.providerTransactionId,
+        amount: amount.amount,
+        currency: amount.currency,
+      }),
+    };
+  }
+
+  /**
+   * Creates a webhook endpoint in the account of the secret key
+   * (`POST /v1/webhook_endpoints`) for the URL, with the event types the
+   * platform handles, the API version the pinned SDK is built for (so event
+   * payloads have the shape its types describe), and the platform's IDs as
+   * metadata. The request's operation ID is the idempotency key of every try.
+   * Stripe returns the signing secret only in this answer.
+   */
+  async createWebhookEndpoint(
+    input: CreateWebhookEndpointInput,
+  ): Promise<WebhookEndpointCreation> {
+    if (checkStripeKey(input.credentials.secretKey, 'secret') !== undefined) {
+      return { outcome: 'rejected', reason: 'CREDENTIALS' };
+    }
+    const client = this.client(input.credentials.secretKey, {
+      timeout: this.timeoutMs,
+      maxNetworkRetries: WEBHOOK_ENDPOINT_MAX_NETWORK_RETRIES,
+    });
+    let endpoint: Stripe.WebhookEndpoint;
+    try {
+      endpoint = await client.webhookEndpoints.create(
+        {
+          url: input.url,
+          enabled_events: [...STRIPE_WEBHOOK_EVENT_TYPES],
+          api_version: Stripe.API_VERSION,
+          description: 'MerchantFlow',
+          metadata: {
+            merchant_id: input.references.merchantId,
+            processor_account_id: input.references.processorAccountId,
+          },
+        },
+        { idempotencyKey: input.operationId },
+      );
+    } catch (error) {
+      if (
+        error instanceof Stripe.errors.StripeAuthenticationError ||
+        error instanceof Stripe.errors.StripePermissionError
+      ) {
+        return { outcome: 'rejected', reason: 'CREDENTIALS' };
+      }
+      if (error instanceof Stripe.errors.StripeInvalidRequestError) {
+        return { outcome: 'rejected', reason: 'INVALID_REQUEST' };
+      }
+      return { outcome: 'unavailable', category: unavailableCategoryOf(error) };
+    }
+    const endpointId = WEBHOOK_ENDPOINT_ID.test(endpoint.id)
+      ? endpoint.id
+      : null;
+    const secret = endpoint.secret;
+    if (
+      endpoint.livemode ||
+      endpointId === null ||
+      typeof secret !== 'string' ||
+      !WEBHOOK_SIGNING_SECRET.test(secret)
+    ) {
+      return { outcome: 'unavailable', category: 'UNKNOWN' };
+    }
+    return { outcome: 'created', endpointId, signingSecret: secret };
+  }
+
+  /**
+   * Deletes a webhook endpoint (`DELETE /v1/webhook_endpoints/:id`). A 404 is
+   * `not_found`: the endpoint no longer exists. Deleting is safe to repeat, so
+   * the read retry settings apply.
+   */
+  async deleteWebhookEndpoint(
+    input: DeleteWebhookEndpointInput,
+  ): Promise<WebhookEndpointDeletion> {
+    if (checkStripeKey(input.credentials.secretKey, 'secret') !== undefined) {
+      return { outcome: 'unavailable', category: 'CONFIGURATION' };
+    }
+    if (!WEBHOOK_ENDPOINT_ID.test(input.endpointId)) {
+      return { outcome: 'unavailable', category: 'INVALID_REQUEST' };
+    }
+    const client = this.client(
+      input.credentials.secretKey,
+      this.readSettings(undefined),
+    );
+    try {
+      await client.webhookEndpoints.del(input.endpointId);
+    } catch (error) {
+      if (
+        error instanceof Stripe.errors.StripeInvalidRequestError &&
+        error.statusCode === 404
+      ) {
+        return { outcome: 'not_found' };
+      }
+      return { outcome: 'unavailable', category: unavailableCategoryOf(error) };
+    }
+    return { outcome: 'deleted' };
+  }
+
+  /**
+   * Verifies a delivery with Stripe's `webhooks.constructEvent` on the raw
+   * body, with Stripe's default tolerance, and normalizes the event. It makes
+   * no network call and needs no secret key.
+   */
+  verifyWebhookEvent(input: VerifyWebhookEventInput): WebhookEventVerification {
+    return verifyStripeWebhook(
+      input.payload,
+      input.signatureHeader,
+      input.signingSecret,
+    );
   }
 }
 

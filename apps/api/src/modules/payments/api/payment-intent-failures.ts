@@ -13,6 +13,7 @@ import type { GetPaymentIntentResult } from '../application/get-payment-intent.s
 import type { ListPaymentAttemptsResult } from '../application/list-payment-attempts.service.js';
 import type { ListPaymentIntentsResult } from '../application/list-payment-intents.service.js';
 import type { ListRefundsResult } from '../application/list-refunds.service.js';
+import type { RefreshRefundFailureCode } from '../application/refresh-refund.service.js';
 import type { RefundPaymentIntentFailureCode } from '../application/refund-payment-intent.service.js';
 import type { CreatePaymentIntentBody } from './payment-intent.schemas.js';
 import type { CreateRefundBody } from './refund.schemas.js';
@@ -221,5 +222,27 @@ export function toListRefundsApiException(
       return new ApiException('INSUFFICIENT_ROLE');
     case 'NOT_FOUND':
       return new ApiException('NOT_FOUND');
+  }
+}
+
+/** The exception for a refused refund check. */
+export function toRefreshRefundApiException(
+  code: RefreshRefundFailureCode,
+): ApiException {
+  switch (code) {
+    case 'FORBIDDEN':
+      return new ApiException('INSUFFICIENT_ROLE');
+    case 'NOT_FOUND':
+      return new ApiException('NOT_FOUND');
+    case 'NOT_REFRESHABLE':
+      return new ApiException('REFUND_NOT_REFRESHABLE');
+    case 'LOOKUP_UNAVAILABLE':
+      return new ApiException('PROCESSOR_LOOKUP_UNAVAILABLE');
+    case 'CREDENTIALS_KEY_NOT_CONFIGURED':
+      return new ApiException('CREDENTIALS_KEY_NOT_CONFIGURED');
+    case 'PROVIDER_UNSUPPORTED':
+      return new ApiException('PROCESSOR_PROVIDER_UNSUPPORTED');
+    case 'LOCK_TIMEOUT':
+      return new ApiException('OPERATION_TIMEOUT');
   }
 }

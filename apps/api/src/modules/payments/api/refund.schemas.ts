@@ -99,3 +99,22 @@ export const refundListResponseSchema = z.object({
 });
 
 export type RefundListResponse = z.infer<typeof refundListResponseSchema>;
+
+export const refundIdParamSchema = z.uuid();
+
+/** The answer of a refund check with the processor. */
+export const refundRefreshResponseSchema = refundCreationResponseSchema.extend({
+  change: z
+    .enum([
+      'REFUND_SUCCEEDED',
+      'REFUND_FAILED',
+      'REFUND_PENDING',
+      'REFUND_REVERSED',
+    ])
+    .nullable()
+    .describe(
+      'What the check changed: a pending or unknown refund succeeded, failed, or turned out pending, or a succeeded refund failed afterwards and was reversed; null when the processor confirmed the status.',
+    ),
+});
+
+export type RefundRefreshResponse = z.infer<typeof refundRefreshResponseSchema>;

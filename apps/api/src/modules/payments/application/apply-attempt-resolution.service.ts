@@ -8,11 +8,8 @@ import {
   type PaymentIntentStatus,
 } from '@merchantflow/domain';
 import { Inject, Injectable } from '@nestjs/common';
+import type { AuditEvent } from '../../audit/application/audit-event.js';
 import { appendAuditEvent } from '../../audit/infrastructure/audit-event-queries.js';
-import {
-  auditActorOf,
-  type Principal,
-} from '../../auth/application/principal.js';
 import { CLOCK, type Clock } from '../../clock/clock.js';
 import { CompleteIdempotencyRecordService } from '../../idempotency/application/complete-idempotency-record.service.js';
 import type { IdempotentResponse } from '../../idempotency/application/idempotency-record.js';
@@ -44,14 +41,21 @@ export type PresentPaymentConfirmation = (
   view: PaymentConfirmationView,
 ) => IdempotentResponse;
 
+/** Who caused an Apply, as its audit event records it. */
+export type AuditActor = Pick<AuditEvent, 'actorType' | 'actorId'>;
+
 export interface ApplyAttemptResolutionCommand {
-  readonly principal: Principal;
+  /** The key or user of a request, or `SYSTEM` for a provider event. */
+  readonly actor: AuditActor;
   readonly correlationId: string;
   /** The intent and the attempt as the caller last read them. */
   readonly intent: PaymentIntent;
   readonly attempt: PaymentAttempt;
   readonly resolution: AttemptResolution;
-  /** `PAYMENT_INTENT_CONFIRMED` or `PAYMENT_INTENT_ACTION_COMPLETED`. */
+  /**
+   * `PAYMENT_INTENT_CONFIRMED`, `PAYMENT_INTENT_ACTION_COMPLETED`, or
+   * `PAYMENT_ATTEMPT_RESOLVED_BY_PROVIDER_EVENT`.
+   */
   readonly auditAction: string;
   readonly present: PresentPaymentConfirmation;
 }
@@ -209,7 +213,7 @@ export class ApplyAttemptResolutionService {
     await appendAuditEvent(trx, {
       id: randomUUID(),
       occurredAt: now,
-      ...auditActorOf(command.principal),
+      ...command.actor,
       action: command.auditAction,
       targetType: 'PAYMENT_INTENT',
       targetId: updatedIntent.id,
