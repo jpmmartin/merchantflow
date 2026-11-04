@@ -16,6 +16,7 @@ import {
 import { CLOCK, type Clock } from '../../clock/clock.js';
 import { CompleteIdempotencyRecordService } from '../../idempotency/application/complete-idempotency-record.service.js';
 import type { IdempotentResponse } from '../../idempotency/application/idempotency-record.js';
+import { LedgerPostingService } from '../../ledger/application/ledger-posting.service.js';
 import {
   countUnsuccessfulPaymentAttempts,
   updatePaymentAttemptIfStatus,
@@ -115,20 +116,26 @@ async function targetOf(
  *    the third one fails the intent;
  * 3. a conditional update of the intent that requires the status the caller
  *    read;
- * 4. one audit event, without the client secret;
- * 5. for a conclusive result (succeeded, declined, failed), completion of the
+ * 4. for a success, the sale's journal entry through the ledger module, with
+ *    the successful attempt as its source, so the same success can never post
+ *    twice; a decline, a failure, a pending customer action, or an unknown
+ *    outcome posts nothing;
+ * 5. one audit event, without the client secret, naming the journal entry;
+ * 6. for a conclusive result (succeeded, declined, failed), completion of the
  *    confirmation's idempotency record with the response, so a retry of the
  *    confirmation replays it. A result that requires action or is unknown
  *    leaves the record in progress.
  *
- * A transition the policy refuses, or an intent that moved although its
- * attempt had not, is a defect: it throws, and the transaction rolls back.
+ * A transition the policy refuses, an intent that moved although its attempt
+ * had not, or a posting that fails, is a defect: it throws, and the
+ * transaction rolls back, the payment state change included.
  */
 @Injectable()
 export class ApplyAttemptResolutionService {
   constructor(
     @Inject(CLOCK) private readonly clock: Clock,
     private readonly completeRecord: CompleteIdempotencyRecordService,
+    private readonly ledger: LedgerPostingService,
   ) {}
 
   async execute(
@@ -182,6 +189,23 @@ export class ApplyAttemptResolutionService {
       );
     }
 
+    let journalEntryId: string | null = null;
+    if (resolution.kind === 'SUCCEEDED') {
+      const posting = await this.ledger.postPaymentSale(trx, {
+        merchantId: updatedIntent.merchantId,
+        paymentIntentId: updatedIntent.id,
+        paymentAttemptId: updatedAttempt.id,
+        amount: updatedIntent.amount,
+        merchantReference: updatedIntent.merchantReference,
+      });
+      if (!posting.ok) {
+        throw new Error(
+          `sale of payment attempt ${updatedAttempt.id} cannot be posted: ${posting.reason}`,
+        );
+      }
+      journalEntryId = posting.entry.id;
+    }
+
     await appendAuditEvent(trx, {
       id: randomUUID(),
       occurredAt: now,
@@ -202,6 +226,7 @@ export class ApplyAttemptResolutionService {
         error_category: updatedAttempt.errorCategory,
         amount_minor: toAmountMinorString(updatedIntent.amount),
         currency: updatedIntent.amount.currency,
+        journal_entry_id: journalEntryId,
       },
     });
 

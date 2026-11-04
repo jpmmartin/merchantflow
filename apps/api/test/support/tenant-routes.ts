@@ -16,7 +16,16 @@ export interface TenantResources {
   readonly userId: string;
   /** Identifier of a processor account that belongs to the merchant. */
   readonly processorAccountId: string;
+  /**
+   * Identifier of a journal entry that belongs to the merchant. Optional only
+   * so that a label built from a partial set of resources still compiles; the
+   * tenants of the suite always have one.
+   */
+  readonly journalEntryId?: string | undefined;
 }
+
+/** A journal entry ID for a set of resources that has none. */
+const NO_JOURNAL_ENTRY_ID = '00000000-0000-4000-8000-000000000000';
 
 /**
  * A live-mode Stripe secret key that exists nowhere. The adapter refuses it
@@ -259,6 +268,35 @@ export const TENANT_ROUTES: readonly TenantRoute[] = [
     route: 'POST /merchants/:id/processor-accounts/:processorAccountId/default',
     request: (r) => ({
       path: `/merchants/${r.merchantId}/processor-accounts/${r.processorAccountId}/default`,
+    }),
+    nested: true,
+    platformExisting: 200,
+    platformMissing: 404,
+  },
+  {
+    kind: 'resource',
+    route: 'GET /merchants/:id/ledger/balances',
+    request: (r) => ({ path: `/merchants/${r.merchantId}/ledger/balances` }),
+    platformExisting: 200,
+    platformMissing: 404,
+  },
+  {
+    // The query names a payment intent of the addressed merchant; parameters
+    // other than limit, cursor, and payment_intent_id are ignored, so the
+    // merchant comes only from the path.
+    kind: 'resource',
+    route: 'GET /merchants/:id/ledger/journal-entries',
+    request: (r) => ({
+      path: `/merchants/${r.merchantId}/ledger/journal-entries?payment_intent_id=${r.paymentIntentId}`,
+    }),
+    platformExisting: 200,
+    platformMissing: 404,
+  },
+  {
+    kind: 'resource',
+    route: 'GET /merchants/:id/ledger/journal-entries/:journalEntryId',
+    request: (r) => ({
+      path: `/merchants/${r.merchantId}/ledger/journal-entries/${r.journalEntryId ?? NO_JOURNAL_ENTRY_ID}`,
     }),
     nested: true,
     platformExisting: 200,

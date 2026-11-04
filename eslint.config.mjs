@@ -123,8 +123,13 @@ export default defineConfig(
     // cannot use `Number`, the globals that return or coerce to a number,
     // `Math`, `JSON` (it reads every numeric literal as a double), or the global
     // object that would reach them, and it cannot use unary plus.
-    // The frontend's amount conversion follows the same rules (AD-74).
-    files: ['packages/domain/src/money/**/*.ts', 'apps/web/src/money/**/*.ts'],
+    // The frontend's amount conversion (AD-74) and the ledger rules (P-06)
+    // follow the same rules.
+    files: [
+      'packages/domain/src/money/**/*.ts',
+      'packages/domain/src/ledger/**/*.ts',
+      'apps/web/src/money/**/*.ts',
+    ],
     rules: {
       'no-restricted-globals': [
         'error',

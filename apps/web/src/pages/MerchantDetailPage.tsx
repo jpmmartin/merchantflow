@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { useParams } from 'react-router';
+import { Link, useParams } from 'react-router';
 import type { CurrentPrincipal } from '../api/auth';
 import {
   changeMerchantStatus,
@@ -20,7 +20,8 @@ interface MerchantDetailPageProps {
 }
 
 /**
- * One merchant: its profile, its users, and its API keys. Only the platform
+ * One merchant: its profile, a link to its ledger, its users, and its API
+ * keys. Only the platform
  * administrator sees the status change; a merchant user sees its own merchant
  * and gets the API's 404 for any other.
  */
@@ -79,6 +80,12 @@ export function MerchantDetailPage({ principal }: MerchantDetailPageProps) {
         <h1 className="h3 mb-0 me-2">{merchant.display_name}</h1>
         <StatusBadge status={merchant.status} />
         <span className="me-auto" />
+        <Link
+          to={`/merchants/${merchant.id}/ledger`}
+          className="btn btn-outline-primary"
+        >
+          Ledger
+        </Link>
         {action === undefined ? null : (
           <button
             type="button"

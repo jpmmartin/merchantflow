@@ -37,6 +37,7 @@ export function navigationFor(
       return [
         { to: homePathFor(principal), label: 'My merchant' },
         { to: '/payments', label: 'Payments', matchNested: true },
+        { to: `${homePathFor(principal)}/ledger`, label: 'Ledger' },
         account,
       ];
   }

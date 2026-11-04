@@ -7,6 +7,7 @@ import {
   Module,
   type DynamicModule,
   type INestApplicationContext,
+  type Provider,
   type Type,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -41,15 +42,37 @@ export const SEED_ACTOR_ID = 'dev-seed';
  */
 export const SEED_LOCK_KEY = 7_301_001;
 
-/** Dependency graph of the seed: no HTTP server, no merchant or other module. */
+/**
+ * What a command needs beyond the seed's graph, and the sentence that refuses
+ * it in production.
+ */
+export interface CliContextNeeds {
+  readonly imports: readonly Type<unknown>[];
+  readonly providers: readonly Provider[];
+  readonly productionRefusal: string;
+}
+
+const SEED_NEEDS: CliContextNeeds = {
+  imports: [AuthModule],
+  providers: [],
+  productionRefusal:
+    'Refusing to seed: NODE_ENV is "production". The development seed runs only in development and test.',
+};
+
+/**
+ * Dependency graph of a command: no HTTP server; the seed adds only the auth
+ * module, and another command the modules it names.
+ */
 @Module({})
 class SeedModule {
   static register(
     appConfigModule: Type<unknown>,
     logDestination: DestinationStream,
+    needs: CliContextNeeds,
   ): DynamicModule {
     return {
       module: SeedModule,
+      providers: [...needs.providers],
       imports: [
         appConfigModule,
         LoggerModule.forRootAsync({
@@ -62,7 +85,7 @@ class SeedModule {
         }),
         ClockModule,
         DatabaseModule,
-        AuthModule,
+        ...needs.imports,
       ],
     };
   }
@@ -109,7 +132,8 @@ async function readNodeEnv(
 }
 
 /**
- * Prepares a seed run: it validates the configuration, refuses production
+ * Prepares a seed run, or the run of another development command through
+ * `needs`: it validates the configuration, refuses production
  * before any database connection exists, builds the seed context with its
  * logs on `stderr`, and checks that the database is migrated. It resolves with
  * the context, which the caller closes, or with the exit code after writing
@@ -117,6 +141,7 @@ async function readNodeEnv(
  */
 export async function openSeedContext(
   options: SeedCliOptions,
+  needs: CliContextNeeds = SEED_NEEDS,
 ): Promise<
   | { readonly ok: true; readonly context: INestApplicationContext }
   | { readonly ok: false; readonly exitCode: number }
@@ -134,16 +159,16 @@ export async function openSeedContext(
     throw error;
   }
   if (nodeEnv === 'production') {
-    options.stderr.write(
-      'Refusing to seed: NODE_ENV is "production". The development seed runs only in development and test.\n',
-    );
+    options.stderr.write(`${needs.productionRefusal}\n`);
     return { ok: false, exitCode: FAILURE };
   }
 
   const context = await createContext(
-    SeedModule.register(configModule, {
-      write: (line) => void options.stderr.write(line),
-    }),
+    SeedModule.register(
+      configModule,
+      { write: (line) => void options.stderr.write(line) },
+      needs,
+    ),
   );
   const database = context.get<Database>(DATABASE);
   let failure: string | undefined;

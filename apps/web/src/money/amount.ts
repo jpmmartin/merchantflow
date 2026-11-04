@@ -122,3 +122,21 @@ export function formatAmountMinor(
   const padded = amountMinor.padStart(exponent + 1, '0');
   return `${padded.slice(0, -exponent)}.${padded.slice(-exponent)}`;
 }
+
+/**
+ * Formats a signed API amount in minor units, such as a balance `"-10050"`,
+ * as `-100.50`: the sign is kept as text and the digits are formatted by
+ * `formatAmountMinor`.
+ */
+export function formatSignedAmountMinor(
+  amountMinor: string,
+  currency: string,
+): string {
+  if (amountMinor.startsWith('-')) {
+    const digits = amountMinor.slice(1);
+    return parseAmountMinor(digits).ok && digits !== '0'
+      ? `-${formatAmountMinor(digits, currency)}`
+      : `${amountMinor} (minor units)`;
+  }
+  return formatAmountMinor(amountMinor, currency);
+}

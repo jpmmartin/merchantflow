@@ -487,6 +487,7 @@ describe('tenant isolation', () => {
               // A processor account always belongs to a merchant, so the
               // closest case is the account of the other merchant.
               processorAccountId: tenants.b.resources.processorAccountId,
+              journalEntryId: tenants.b.resources.journalEntryId,
             }),
           );
 

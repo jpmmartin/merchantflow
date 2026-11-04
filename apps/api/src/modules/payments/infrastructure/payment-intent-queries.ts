@@ -189,3 +189,50 @@ export async function listPaymentIntentsForMerchant(
     .execute();
   return rows.map(toPaymentIntent);
 }
+
+/** A successful attempt and its intent, as the ledger backfill reads them. */
+export interface SucceededSale {
+  readonly attemptId: string;
+  readonly attemptCreatedAt: Date;
+  readonly intent: PaymentIntent;
+}
+
+/**
+ * A page of every merchant's successful attempts with their intents, oldest
+ * first by the attempt's creation time and then its id. Only the ledger
+ * backfill reads across merchants; each row keeps its own merchant.
+ */
+export async function listSucceededSales(
+  db: Database,
+  page: {
+    readonly limit: number;
+    readonly after?: KeysetPosition | undefined;
+  },
+): Promise<SucceededSale[]> {
+  let query = db
+    .selectFrom('payment_attempts as a')
+    .innerJoin('payment_intents as i', (join) =>
+      join
+        .onRef('i.merchant_id', '=', 'a.merchant_id')
+        .onRef('i.id', '=', 'a.payment_intent_id'),
+    )
+    .where('a.status', '=', 'SUCCEEDED')
+    .selectAll('i')
+    .select(['a.id as attempt_id', 'a.created_at as attempt_created_at']);
+  if (page.after !== undefined) {
+    const { createdAt, id } = page.after;
+    query = query.where((eb) =>
+      eb(eb.refTuple('a.created_at', 'a.id'), '>', eb.tuple(createdAt, id)),
+    );
+  }
+  const rows = await query
+    .orderBy('a.created_at')
+    .orderBy('a.id')
+    .limit(page.limit)
+    .execute();
+  return rows.map(({ attempt_id, attempt_created_at, ...intent }) => ({
+    attemptId: attempt_id,
+    attemptCreatedAt: attempt_created_at,
+    intent: toPaymentIntent(intent),
+  }));
+}

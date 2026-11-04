@@ -61,6 +61,10 @@ import { secretCipherProvider } from './infrastructure/secret-cipher.provider.js
     ProcessorAccountsForPaymentsService,
     secretCipherProvider,
   ],
-  exports: [LockMerchantForPaymentService, ProcessorAccountsForPaymentsService],
+  exports: [
+    GetMerchantService,
+    LockMerchantForPaymentService,
+    ProcessorAccountsForPaymentsService,
+  ],
 })
 export class MerchantsModule {}

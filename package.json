@@ -14,6 +14,7 @@
     "build": "pnpm -r --if-present build",
     "db:migrate": "pnpm build && pnpm --filter @merchantflow/api db:migrate",
     "db:seed": "pnpm build && pnpm --filter @merchantflow/api db:seed",
+    "db:backfill-ledger": "pnpm build && pnpm --filter @merchantflow/api db:backfill-ledger",
     "test": "pnpm -r --if-present test",
     "test:integration": "pnpm -r --if-present test:integration",
     "lint": "eslint .",

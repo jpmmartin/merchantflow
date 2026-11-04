@@ -247,6 +247,68 @@ export type PaymentAttemptRow = Selectable<PaymentAttemptsTable>;
 /** A `payment_attempts` row as inserted. */
 export type NewPaymentAttemptRow = Insertable<PaymentAttemptsTable>;
 
+/**
+ * Row of `ledger_accounts`, owned by the ledger module. No column has an update
+ * type: the `ledger_accounts_restrict_change` trigger rejects every update and
+ * delete. `classification` lists the values of
+ * `ledger_accounts_classification_check`.
+ */
+export interface LedgerAccountsTable {
+  id: ColumnType<string, string, never>;
+  merchant_id: ColumnType<string, string, never>;
+  code: ColumnType<string, string, never>;
+  name: ColumnType<string, string, never>;
+  classification: ColumnType<
+    'ASSET' | 'LIABILITY' | 'REVENUE' | 'EXPENSE',
+    'ASSET' | 'LIABILITY' | 'REVENUE' | 'EXPENSE',
+    never
+  >;
+  currency: ColumnType<string, string, never>;
+  created_at: ColumnType<Date, Date, never>;
+}
+
+/** A `ledger_accounts` row as selected. */
+export type LedgerAccountRow = Selectable<LedgerAccountsTable>;
+
+/**
+ * Row of `journal_entries`, owned by the ledger module. It is append-only, as
+ * the `journal_entries_restrict_change` trigger enforces. `source_type` lists
+ * the values of `journal_entries_source_type_check`, and `line_count` is the
+ * number of lines the deferred `journal_entries_balanced` trigger expects.
+ */
+export interface JournalEntriesTable {
+  id: ColumnType<string, string, never>;
+  merchant_id: ColumnType<string, string, never>;
+  source_type: ColumnType<'PAYMENT_SALE', 'PAYMENT_SALE', never>;
+  source_id: ColumnType<string, string, never>;
+  payment_intent_id: ColumnType<string | null, string | null, never>;
+  description: ColumnType<string, string, never>;
+  line_count: ColumnType<number, number, never>;
+  posted_at: ColumnType<Date, Date, never>;
+}
+
+/** A `journal_entries` row as selected. */
+export type JournalEntryRow = Selectable<JournalEntriesTable>;
+
+/**
+ * Row of `journal_lines`, owned by the ledger module and append-only.
+ * `amount_minor` is a `BIGINT` greater than zero, read as a `bigint`; `side`
+ * lists the values of `journal_lines_side_check`.
+ */
+export interface JournalLinesTable {
+  id: ColumnType<string, string, never>;
+  merchant_id: ColumnType<string, string, never>;
+  journal_entry_id: ColumnType<string, string, never>;
+  line_number: ColumnType<number, number, never>;
+  ledger_account_id: ColumnType<string, string, never>;
+  side: ColumnType<'DEBIT' | 'CREDIT', 'DEBIT' | 'CREDIT', never>;
+  amount_minor: ColumnType<bigint, bigint, never>;
+  currency: ColumnType<string, string, never>;
+}
+
+/** A `journal_lines` row as selected. */
+export type JournalLineRow = Selectable<JournalLinesTable>;
+
 /** Table types of the database, keyed by table name. */
 export interface DatabaseSchema {
   merchants: MerchantsTable;
@@ -258,6 +320,9 @@ export interface DatabaseSchema {
   user_sessions: UserSessionsTable;
   processor_accounts: ProcessorAccountsTable;
   payment_attempts: PaymentAttemptsTable;
+  ledger_accounts: LedgerAccountsTable;
+  journal_entries: JournalEntriesTable;
+  journal_lines: JournalLinesTable;
 }
 
 /** The Kysely instance that every query and transaction goes through. */

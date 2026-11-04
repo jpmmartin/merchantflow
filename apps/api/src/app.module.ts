@@ -5,6 +5,7 @@ import { DatabaseModule } from './modules/database/database.module.js';
 import { ErrorsModule } from './modules/errors/errors.module.js';
 import { LoggingModule } from './modules/logging/logging.module.js';
 import { HealthModule } from './modules/health/health.module.js';
+import { LedgerModule } from './modules/ledger/ledger.module.js';
 import { MerchantsModule } from './modules/merchants/merchants.module.js';
 import { PaymentsModule } from './modules/payments/payments.module.js';
 
@@ -17,6 +18,7 @@ import { PaymentsModule } from './modules/payments/payments.module.js';
     HealthModule,
     AuthModule,
     MerchantsModule,
+    LedgerModule,
     PaymentsModule,
   ],
 })

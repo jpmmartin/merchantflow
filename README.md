@@ -22,11 +22,12 @@ Today the repository contains the runnable foundation only:
 - payment intent creation, `POST /api/v1/payment-intents`, with a required `Idempotency-Key` and protection against a second intent for the same merchant order (see Payment intents); nothing is charged;
 - payment intent retrieval, `GET /api/v1/payment-intents/{id}`, and listing, `GET /api/v1/payment-intents`, newest first with stable pagination and a status filter, both scoped to the merchant of the key (see Payment intents);
 - payment confirmation through Stripe in test mode, `POST /api/v1/payment-intents/{id}/confirm`, with a required `Idempotency-Key`, the merchant's default Stripe account, and no database transaction open during the Stripe call; 3D Secure completion, `POST /api/v1/payment-intents/{id}/complete-action`; and the attempt history, `GET /api/v1/payment-intents/{id}/attempts` (see Confirming a payment intent);
+- a double-entry merchant ledger: each successful payment posts one balanced, immutable journal entry in the same transaction that records the success, and `GET /api/v1/merchants/{id}/ledger/balances`, `.../ledger/journal-entries`, and `.../ledger/journal-entries/{journalEntryId}` read the accounts with their balances and the entries (see Ledger);
 - a development seed, `pnpm db:seed`, that creates the first platform administrator key and the platform administrator user (see Demonstration: two merchants, neither sees the other, and Web frontend);
 - linting, formatting, type checking, unit tests, and integration tests against a real PostgreSQL started with Testcontainers, including an HTTP concurrency suite (`tests/concurrency`) that sends 50 simultaneous requests to the listening API and checks that duplicates create one intent;
 - a GitHub Actions workflow that runs the same checks.
 
-Recovery of payments with an unknown outcome, the simulated processor, the ledger, refunds, capture and void, Stripe webhooks, and every other business capability are planned and do not exist yet.
+Recovery of payments with an unknown outcome, the simulated processor, processor fees, settlements and payouts in the ledger, refunds, capture and void, Stripe webhooks, and every other business capability are planned and do not exist yet.
 
 ## Prerequisites
 
@@ -99,6 +100,7 @@ Run each of these as `docker compose exec dev pnpm <script>`.
 | `format:check`     | Fails if any file is not formatted with Prettier                                                        |
 | `db:migrate`       | Builds the project, applies pending SQL migrations to the database in `DATABASE_URL`, and prints status |
 | `db:seed`          | Builds the project, creates the development platform administrator key, and creates the platform administrator user; the key and the user's password are each printed once (see Demonstration and Web frontend) |
+| `db:backfill-ledger` | Builds the project and posts the missing sale entry of every successful payment, such as those that succeeded before the ledger existed; safe to run again (see Ledger) |
 
 `pnpm db:migrate` is safe to run repeatedly: applied migrations are recorded and never run twice, and concurrent runs are serialized by a database lock. The first run on an empty database creates the tables (`merchants`, `audit_events`, `api_keys`, `idempotency_records`, `payment_intents`, `users`, and `user_sessions`), and later runs report `Nothing is pending.` It empties `apps/api/dist` when it builds, which can interrupt a `pnpm dev` that is restarting at that moment.
 
@@ -306,6 +308,39 @@ After Stripe.js `handleNextAction` ran the challenge in the browser, `POST /api/
 
 To find a payment in Stripe, open the Dashboard of the merchant's sandbox, go to **Payments** (test mode), and search for the attempt's `pi_` ID; its metadata holds the MerchantFlow IDs.
 
+## Ledger
+
+Each merchant has a double-entry payments ledger. It records the merchant's side of its own Stripe account: the funds go from Stripe to the merchant, and MerchantFlow never holds them or owes them.
+
+**Accounts**, one per merchant and currency, created by the first posting that needs them:
+
+| Code   | Name                 | Classification | Normal side | Meaning                                                              |
+| ------ | -------------------- | -------------- | ----------- | -------------------------------------------------------------------- |
+| `1100` | Processor receivable | `ASSET`        | `DEBIT`     | What the merchant's processor account owes it for captured sales     |
+| `4000` | Sales                | `REVENUE`      | `CREDIT`    | Gross amount of the merchant's captured card sales                   |
+
+**Posting.** A payment that reaches `SUCCEEDED`, through confirm or through 3D Secure completion, posts one entry in the same database transaction: debit `1100`, credit `4000`, by the payment's amount, gross of processor fees. Its source is `PAYMENT_SALE` with the successful attempt's ID, which is unique, so the same success can never post twice. A decline, a failure, `REQUIRES_ACTION`, and `UNKNOWN` post nothing, and a failed posting rolls the payment's state change back too. Each `PAYMENT_INTENT_CONFIRMED` or `PAYMENT_INTENT_ACTION_COMPLETED` audit event names its `journal_entry_id` (`null` when nothing was posted).
+
+**Not recorded yet:** processor fees (Stripe reports them later), Stripe settlements and payouts to the merchant's bank, refunds, and disputes.
+
+**Payments that succeeded before the ledger existed** have no entry until you run:
+
+```bash
+docker compose exec dev pnpm db:backfill-ledger
+```
+
+It posts the sale entry of every successful attempt that has none, by the same rule, one short transaction per sale with a `LEDGER_SALE_BACKFILLED` audit event (actor `SYSTEM` / `ledger-backfill`), and prints each posted entry and a summary. A backfilled entry's `posted_at` is the time of the run, not the time of the payment. A second run posts nothing (`Sale entries posted now: 0`); two runs at once are refused by a database lock; after a failure, running it again posts only what is still missing. It refuses to run with `NODE_ENV=production`.
+
+**Guarantees in PostgreSQL:** every entry has at least two lines and exactly the lines it declares, and its debits equal its credits in every currency, checked by a deferred constraint trigger at commit; amounts are positive `BIGINT` minor units; a line has the currency of its account; entries, lines, and accounts reject `UPDATE`, `DELETE`, and `TRUNCATE`; a source is posted once.
+
+**Endpoints** (`PLATFORM_ADMIN` for any merchant; `MERCHANT_ADMIN` and `MERCHANT_READ_ONLY` for their own; another merchant is `404 NOT_FOUND`):
+
+- `GET /api/v1/merchants/{id}/ledger/balances`: `{"merchant_id", "data": [...]}`, each account with `account_id`, `code`, `name`, `classification`, `normal_side`, `currency`, `debit_total_minor`, `credit_total_minor`, `balance_minor` (normal-side total minus the other one; negative values start with `-`), and `created_at`. Balances are computed from the lines on each read; none is stored.
+- `GET /api/v1/merchants/{id}/ledger/journal-entries?limit=&cursor=&payment_intent_id=`: `{"merchant_id", "data": [...], "next_cursor"}`, newest first by posting time, each entry with `id`, `source_type`, `source_id`, `payment_intent_id`, `description`, `posted_at`, and its `lines` (`line_number`, `ledger_account_id`, `account_code`, `account_name`, `side`, `amount_minor`, `currency`). Other query parameters are ignored.
+- `GET /api/v1/merchants/{id}/ledger/journal-entries/{journalEntryId}`: one entry with its lines.
+
+All amounts are integer strings of minor units.
+
 ## Demonstration: two merchants, neither sees the other
 
 This walk-through reproduces the first increment from a running stack: a platform administrator registers two merchants, activates them, and issues each an administrator key; each merchant then reads its own data and gets `404` for the other's. It uses synthetic data only. Docker Compose commands run on the host and `pnpm` commands inside the `dev` container (see Running commands); the `curl` commands run on the host. Replace each `<placeholder>` with the value the previous step printed. No real key appears in this document.
@@ -422,7 +457,9 @@ Alternatively, `docker compose down --volumes` followed by the Quick start gives
   - the create form (`/payments/new`, `MERCHANT_ADMIN` only): the amount is typed in major units, such as `100.50`, and sent as `amount_minor` (`"10050"`); the currency is the merchant's default currency and cannot be changed; the order reference is the merchant's own identifier. An amount that is empty, negative, malformed, or has more decimals than the currency allows (`100.505` for USD) is refused before anything is sent. Errors show their code, correlation ID, and for `VALIDATION_FAILED` the invalid fields. A successful creation opens the order's page;
   - the order's page (`/payments/{id}`), with every field, the formatted amount, the status as a badge, and the attempt history (account, status, Stripe `pi_` ID, decline code, error category, times). Another merchant's order, or an unknown id, shows the API's `404`;
   - on a `CREATED` order, for `MERCHANT_ADMIN`, **Pay with a card**: Stripe's card field (Stripe Elements) loaded with the publishable key of the merchant's enabled default account, a list of Stripe test cards, and **Pay**. Stripe.js turns the card into a payment method in the browser and only its `pm_` ID reaches the API. 3D Secure opens Stripe's challenge in the page and the result is applied right after. The page then shows the outcome: success, a decline with its code and "try another card", or an unknown outcome with a warning not to pay again. Without an enabled default account the section links to the merchant's processor accounts;
-  - on a `REQUIRES_ACTION` order, **Continue authentication** opens the 3D Secure challenge again, for example after a reload.
+  - on a `REQUIRES_ACTION` order, **Continue authentication** opens the 3D Secure challenge again, for example after a reload;
+  - on every order's page, its **Journal entries** with their debit and credit lines;
+- a **Ledger** page per merchant (`/merchants/{id}/ledger`): for a merchant user under **Ledger** in the navigation bar, for the platform administrator through the **Ledger** button of each merchant's page. It shows the accounts with code, name, classification, normal side, currency, debit and credit totals, and balance, and the journal entries newest first with **Load more**.
 
 1. With the stack running and the dependencies installed (Quick start steps 1 and 2), apply the migrations and run the seed. The seed prints the administrator's email and a generated password **once**; store the password.
 
@@ -523,9 +560,9 @@ Keep it: losing it makes every stored secret key unreadable, and the accounts mu
 - No rate limit or input size limit beyond the parser's default exists yet, sign-in included. There is no password reset, email verification, or multi-factor authentication.
 - Every merchant user is `MERCHANT_ADMIN`; there is no role choice, re-enabling, password change, or deletion of users yet, and the lists of a merchant's users and keys are not paginated. Platform users are created only by the seed. Only payment intent creation and confirmation take an idempotency key: creating a merchant twice creates two merchants.
 - **A payment whose outcome is unknown stays blocked.** Automatic recovery does not exist yet: a crash of the API while it waits for Stripe, a failure to record Stripe's answer, or an `UNKNOWN` result (a timeout, a connection error, a Stripe server error) leaves the attempt `EXECUTING` or `UNKNOWN` and the intent `PROCESSING` or `UNKNOWN`, and no new attempt is accepted for it until recovery exists. Check such a payment in the Stripe Dashboard by its metadata. A payment left in `REQUIRES_ACTION` also blocks new attempts until the customer completes or fails the challenge.
-- Payments use Stripe in test mode and cards only, with automatic capture; there is no ledger, refund, manual capture, void, or webhook yet. Stripe's PaymentIntent amount limit (99,999,999 minor units) is refused before any call, as a `FAILED` attempt.
+- Payments use Stripe in test mode and cards only, with automatic capture; there is no refund, manual capture, void, or webhook yet. The ledger records only captured sales: no processor fee, settlement, payout, or refund, and a payment that succeeded before the ledger existed has no entry until `pnpm db:backfill-ledger` runs. Its tables reject changes through triggers that a database superuser or the table owner can still disable. Stripe's PaymentIntent amount limit (99,999,999 minor units) is refused before any call, as a `FAILED` attempt.
 - Idempotency records are kept and never deleted (no purge exists). `payment_intents` and `payment_attempts` reject deletes, and changes of an intent's amount, currency, reference, or merchant or of a finished attempt, through triggers that a database superuser or the table owner can still disable.
-- The other business endpoints are the merchant endpoints: no platform key can be issued through the API; the development seed is the only way to create one, and a lost platform key is replaced by revoking it in the database (see Recover a lost platform key). The simulated processor, ledger, and dashboard are planned.
+- The other business endpoints are the merchant endpoints: no platform key can be issued through the API; the development seed is the only way to create one, and a lost platform key is replaced by revoking it in the database (see Recover a lost platform key). The simulated processor and dashboard are planned.
 - The error responses of the health endpoints and of the unknown-route handler are not described in the OpenAPI document.
 - A merchant or payment intent created by a transaction that commits late can be missed by a list walk already past its position; the next walk shows it.
 - The status filter of the payment intent list reads the merchant's intents newest first and keeps those in the status, so a rare status among many intents takes longer to fill a page.

@@ -1,7 +1,10 @@
 import { randomUUID } from 'node:crypto';
-import type { DatabaseSchema } from '@merchantflow/database';
+import type { Database, DatabaseSchema } from '@merchantflow/database';
+import { parsePositiveMoney } from '@merchantflow/domain';
 import { CreateUserService } from '../../src/modules/auth/application/create-user.service.js';
 import { generatePassword } from '../../src/modules/auth/application/password-hash.js';
+import { DATABASE } from '../../src/modules/database/database.module.js';
+import { LedgerPostingService } from '../../src/modules/ledger/application/ledger-posting.service.js';
 import {
   SECRET_CIPHER,
   type SecretCipher,
@@ -23,7 +26,7 @@ import type { TenantResources } from './tenant-routes.js';
 
 /**
  * One merchant with a key of each merchant role, a key to be addressed, a
- * payment intent, a user, and a default processor account.
+ * payment intent, a user, a default processor account, and a journal entry.
  */
 export interface Tenant {
   readonly merchant: ApiMerchant;
@@ -50,6 +53,36 @@ const MISSING_KEY_ID = '9b7d2c1e-3a54-4e8f-8f0b-6d1a5c2e7f43';
 const MISSING_PAYMENT_INTENT_ID = '2d8e5b7a-61c3-4f9d-a0e4-7b3c9f1d6a58';
 const MISSING_USER_ID = '6e2a9c4f-8b17-4d3e-b5a0-1f7c3d9e2b64';
 const MISSING_PROCESSOR_ACCOUNT_ID = '8a3f1d6c-2e9b-4c7a-9f05-3b8e6d2a1c47';
+const MISSING_JOURNAL_ENTRY_ID = '5f9c2a7e-1d4b-4e8a-b3c6-7a2e9d1f4b85';
+
+/**
+ * Posts a sale for a merchant's intent through the ledger module's posting
+ * service, as Apply does for a successful attempt, so the merchant has
+ * accounts, a balance, and a journal entry. The source is a new attempt ID,
+ * because the tenant intents have no attempt.
+ */
+async function postJournalEntry(
+  api: MerchantApi,
+  merchantId: string,
+  paymentIntentId: string,
+): Promise<string> {
+  const amount = parsePositiveMoney('1000', 'USD');
+  if (!amount.ok) throw new Error('Expected a valid amount');
+  const posting = await api.app
+    .get<Database>(DATABASE)
+    .transaction()
+    .execute((trx) =>
+      api.app.get(LedgerPostingService).postPaymentSale(trx, {
+        merchantId,
+        paymentIntentId,
+        paymentAttemptId: randomUUID(),
+        amount: amount.money,
+        merchantReference: 'tenant-ledger',
+      }),
+    );
+  if (!posting.ok) throw new Error('Expected a posted journal entry');
+  return posting.entry.id;
+}
 
 /**
  * Stores a default Stripe processor account for a merchant directly, with its
@@ -117,6 +150,11 @@ async function createTenant(api: MerchantApi): Promise<Tenant> {
   }
   const userId = (user.body as { id: string }).id;
   const processorAccountId = await createProcessorAccount(api, merchant.id);
+  const journalEntryId = await postJournalEntry(
+    api,
+    merchant.id,
+    paymentIntentId,
+  );
   return {
     merchant,
     admin,
@@ -128,6 +166,7 @@ async function createTenant(api: MerchantApi): Promise<Tenant> {
       paymentIntentId,
       userId,
       processorAccountId,
+      journalEntryId,
     },
   };
 }
@@ -161,6 +200,7 @@ export async function createTenants(api: MerchantApi): Promise<Tenants> {
       paymentIntentId: MISSING_PAYMENT_INTENT_ID,
       userId: MISSING_USER_ID,
       processorAccountId: MISSING_PROCESSOR_ACCOUNT_ID,
+      journalEntryId: MISSING_JOURNAL_ENTRY_ID,
     },
   };
 }

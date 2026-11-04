@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router';
 import type { CurrentPrincipal } from '../api/auth';
+import { listJournalEntries, type JournalEntry } from '../api/ledger';
 import { listProcessorAccounts, type ProcessorAccount } from '../api/merchants';
 import {
   getPaymentIntent,
@@ -10,6 +11,7 @@ import {
 } from '../api/payments';
 import { ErrorAlert } from '../components/ErrorAlert';
 import { formatTime } from '../components/format';
+import { JournalEntriesTable } from '../components/JournalEntriesTable';
 import { canCreatePayments } from '../components/navigation';
 import {
   PaymentAttemptStatusBadge,
@@ -29,7 +31,7 @@ type DetailState =
 
 /**
  * One payment order, by the id in the URL, with every field the API returns,
- * its attempt history, and for `MERCHANT_ADMIN` the pay section of a
+ * its attempt history, its journal entries, and for `MERCHANT_ADMIN` the pay section of a
  * `CREATED` order or the authentication step of a `REQUIRES_ACTION` one. An
  * order of another merchant and an unknown id both show the API's
  * `NOT_FOUND`.
@@ -53,8 +55,24 @@ export function PaymentDetailPage({
   const [outcome, setOutcome] = useState<PaymentStepOutcome | undefined>(
     undefined,
   );
+  const [entries, setEntries] = useState<readonly JournalEntry[] | undefined>(
+    undefined,
+  );
+  const [entriesError, setEntriesError] = useState<unknown>(undefined);
+
+  const reloadEntries = useCallback(async () => {
+    if (merchantId === null) return;
+    try {
+      const page = await listJournalEntries(merchantId, { paymentIntentId });
+      setEntries(page.data);
+      setEntriesError(undefined);
+    } catch (caught) {
+      setEntriesError(caught);
+    }
+  }, [merchantId, paymentIntentId]);
 
   const reload = useCallback(async () => {
+    void reloadEntries();
     try {
       const [intent, list] = await Promise.all([
         getPaymentIntent(paymentIntentId),
@@ -71,11 +89,12 @@ export function PaymentDetailPage({
           : { kind: 'failed', error: caught },
       );
     }
-  }, [paymentIntentId]);
+  }, [paymentIntentId, reloadEntries]);
 
   useEffect(() => {
     setState({ kind: 'loading' });
     setAttempts(undefined);
+    setEntries(undefined);
     setOutcome(undefined);
     void reload();
   }, [reload]);
@@ -138,6 +157,18 @@ export function PaymentDetailPage({
             accounts={accounts}
             error={attemptsError}
           />
+          <section className="mb-4">
+            <h2 className="h5">Journal entries</h2>
+            <ErrorAlert error={entriesError} />
+            {entries === undefined ? null : entries.length === 0 ? (
+              <p className="text-body-secondary">
+                No journal entries. A payment is posted to the ledger when it
+                succeeds; declines and pending payments post nothing.
+              </p>
+            ) : (
+              <JournalEntriesTable entries={entries} linkPayments={false} />
+            )}
+          </section>
         </>
       ) : null}
     </>

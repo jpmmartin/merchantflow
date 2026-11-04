@@ -18,7 +18,8 @@
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "db:migrate": "node dist/cli/migrate.js",
-    "db:seed": "node dist/cli/seed.js && node dist/cli/seed-admin-user.js"
+    "db:seed": "node dist/cli/seed.js && node dist/cli/seed-admin-user.js",
+    "db:backfill-ledger": "node dist/cli/backfill-ledger.js"
   },
   "dependencies": {
     "@merchantflow/database": "workspace:*",

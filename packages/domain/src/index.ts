@@ -60,3 +60,27 @@ export {
   type PaymentIntentTransitionFailure,
   type PaymentIntentTransitionResult,
 } from './payment-intent/payment-intent-transition.js';
+export {
+  JOURNAL_LINE_SIDES,
+  LEDGER_ACCOUNTS,
+  LEDGER_ACCOUNT_CLASSIFICATIONS,
+  PROCESSOR_RECEIVABLE_ACCOUNT,
+  SALES_ACCOUNT,
+  isLedgerAccountCode,
+  ledgerAccountDefinition,
+  normalBalanceSide,
+  type JournalLineSide,
+  type LedgerAccountClassification,
+  type LedgerAccountCode,
+  type LedgerAccountDefinition,
+} from './ledger/ledger-account.js';
+export {
+  MIN_JOURNAL_LINES,
+  validateJournalEntry,
+  type BalancedJournalLines,
+  type JournalEntryFailure,
+  type JournalEntryValidationResult,
+  type JournalLineDraft,
+} from './ledger/journal-entry.js';
+export { salePostingLines } from './ledger/sale-posting.js';
+export { accountBalance } from './ledger/account-balance.js';
