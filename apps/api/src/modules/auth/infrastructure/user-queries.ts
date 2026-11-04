@@ -156,3 +156,17 @@ export async function disableEnabledUser(
     .executeTakeFirst();
   return row === undefined ? undefined : toUser(row);
 }
+
+/** The users with the given ids that exist; an empty list reads nothing. */
+export async function findUsersByIds(
+  db: Database,
+  ids: readonly string[],
+): Promise<User[]> {
+  if (ids.length === 0) return [];
+  const rows = await db
+    .selectFrom('users')
+    .selectAll()
+    .where('id', 'in', ids)
+    .execute();
+  return rows.map(toUser);
+}

@@ -25,6 +25,8 @@ import {
   PaymentStatusBadge,
 } from '../components/PaymentStatusBadge';
 import { formatAmountMinor } from '../money/amount';
+import { getPaymentTimeline, type TimelineItem } from '../api/operations';
+import { PaymentTimeline } from '../components/PaymentTimeline';
 import { PaymentActionSection } from './PaymentActionSection';
 import { PaymentCaptureSection } from './PaymentCaptureSection';
 import {
@@ -125,6 +127,10 @@ export function PaymentDetailPage({
     readonly AuthorizationAction[] | undefined
   >(undefined);
   const [actionsError, setActionsError] = useState<unknown>(undefined);
+  const [timeline, setTimeline] = useState<readonly TimelineItem[] | undefined>(
+    undefined,
+  );
+  const [timelineError, setTimelineError] = useState<unknown>(undefined);
 
   const reloadEntries = useCallback(async () => {
     if (merchantId === null) return;
@@ -155,10 +161,20 @@ export function PaymentDetailPage({
     }
   }, [paymentIntentId]);
 
+  const reloadTimeline = useCallback(async () => {
+    try {
+      setTimeline((await getPaymentTimeline(paymentIntentId)).data);
+      setTimelineError(undefined);
+    } catch (caught) {
+      setTimelineError(caught);
+    }
+  }, [paymentIntentId]);
+
   const reload = useCallback(async () => {
     void reloadEntries();
     void reloadRefunds();
     void reloadActions();
+    void reloadTimeline();
     try {
       const [intent, list] = await Promise.all([
         getPaymentIntent(paymentIntentId),
@@ -175,7 +191,13 @@ export function PaymentDetailPage({
           : { kind: 'failed', error: caught },
       );
     }
-  }, [paymentIntentId, reloadEntries, reloadRefunds, reloadActions]);
+  }, [
+    paymentIntentId,
+    reloadEntries,
+    reloadRefunds,
+    reloadActions,
+    reloadTimeline,
+  ]);
 
   useEffect(() => {
     setState({ kind: 'loading' });
@@ -183,6 +205,7 @@ export function PaymentDetailPage({
     setEntries(undefined);
     setRefunds(undefined);
     setActions(undefined);
+    setTimeline(undefined);
     setOutcome(undefined);
     void reload();
   }, [reload]);
@@ -329,6 +352,19 @@ export function PaymentDetailPage({
               </p>
             ) : (
               <JournalEntriesTable entries={entries} linkPayments={false} />
+            )}
+          </section>
+          <section className="mb-4">
+            <h2 className="h5">Timeline</h2>
+            <p className="text-body-secondary small">
+              Every step of this payment, oldest first. Shaded rows are the
+              records (order, attempts, captures, voids, refunds, journal
+              entries) with their current status; the other rows are audit
+              events with who did each step.
+            </p>
+            <ErrorAlert error={timelineError} />
+            {timeline === undefined ? null : (
+              <PaymentTimeline items={timeline} />
             )}
           </section>
         </>

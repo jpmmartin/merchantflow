@@ -129,3 +129,17 @@ export async function listApiKeysOfMerchant(
     .execute();
   return rows.map(toApiKey);
 }
+
+/** The keys with the given ids that exist; an empty list reads nothing. */
+export async function findApiKeysByIds(
+  db: Database,
+  ids: readonly string[],
+): Promise<ApiKey[]> {
+  if (ids.length === 0) return [];
+  const rows = await db
+    .selectFrom('api_keys')
+    .selectAll()
+    .where('id', 'in', ids)
+    .execute();
+  return rows.map(toApiKey);
+}

@@ -7,6 +7,7 @@ import { LoggingModule } from './modules/logging/logging.module.js';
 import { HealthModule } from './modules/health/health.module.js';
 import { LedgerModule } from './modules/ledger/ledger.module.js';
 import { MerchantsModule } from './modules/merchants/merchants.module.js';
+import { OperationsModule } from './modules/operations/operations.module.js';
 import { PaymentsModule } from './modules/payments/payments.module.js';
 import { WebhooksModule } from './modules/webhooks/webhooks.module.js';
 
@@ -22,6 +23,7 @@ import { WebhooksModule } from './modules/webhooks/webhooks.module.js';
     LedgerModule,
     PaymentsModule,
     WebhooksModule,
+    OperationsModule,
   ],
 })
 export class AppModule {}

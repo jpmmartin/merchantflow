@@ -24,10 +24,14 @@ export function navigationFor(
   principal: CurrentPrincipal,
 ): readonly NavigationEntry[] {
   const account: NavigationEntry = { to: '/account', label: 'Account' };
+  // The API scopes the audit log by the session: everything for the platform
+  // administrator, the own merchant's events for a merchant user.
+  const audit: NavigationEntry = { to: '/audit', label: 'Audit log' };
   switch (principal.role) {
     case 'PLATFORM_ADMIN':
       return [
         { to: '/merchants', label: 'Merchants', matchNested: true },
+        audit,
         account,
       ];
     case 'MERCHANT_ADMIN':
@@ -38,6 +42,7 @@ export function navigationFor(
         { to: homePathFor(principal), label: 'My merchant' },
         { to: '/payments', label: 'Payments', matchNested: true },
         { to: `${homePathFor(principal)}/ledger`, label: 'Ledger' },
+        audit,
         account,
       ];
   }

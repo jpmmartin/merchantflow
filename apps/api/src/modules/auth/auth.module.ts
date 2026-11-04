@@ -7,6 +7,7 @@ import { AuthController } from './api/auth.controller.js';
 import { AuthenticateApiKeyService } from './application/authenticate-api-key.service.js';
 import { AuthenticateSessionService } from './application/authenticate-session.service.js';
 import { CreateUserService } from './application/create-user.service.js';
+import { DescribeActorsService } from './application/describe-actors.service.js';
 import { DisableUserService } from './application/disable-user.service.js';
 import { FindActivePlatformApiKeyService } from './application/find-active-platform-api-key.service.js';
 import { FindApiKeyService } from './application/find-api-key.service.js';
@@ -42,6 +43,7 @@ import { RevokeApiKeyService } from './application/revoke-api-key.service.js';
     LogInService,
     LogOutService,
     GetCurrentPrincipalService,
+    DescribeActorsService,
     { provide: APP_GUARD, useClass: ApiKeyAuthGuard },
   ],
   exports: [
@@ -54,6 +56,7 @@ import { RevokeApiKeyService } from './application/revoke-api-key.service.js';
     ListUsersService,
     DisableUserService,
     ListApiKeysService,
+    DescribeActorsService,
   ],
 })
 export class AuthModule {}

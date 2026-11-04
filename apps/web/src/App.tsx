@@ -11,6 +11,7 @@ import { ErrorAlert } from './components/ErrorAlert';
 import { Layout } from './components/Layout';
 import { canCreatePayments, homePathFor } from './components/navigation';
 import { AccountPage } from './pages/AccountPage';
+import { AuditLogPage } from './pages/AuditLogPage';
 import { CreateMerchantPage } from './pages/CreateMerchantPage';
 import { CreatePaymentPage } from './pages/CreatePaymentPage';
 import { LedgerPage } from './pages/LedgerPage';
@@ -46,9 +47,10 @@ function initialState(): AppState {
 
 /**
  * The screens of a principal. The platform administrator gets the merchant
- * list, the create form, and any merchant's page and ledger; a merchant user
- * gets its own merchant's page and ledger, and its payment orders (the create form only for
- * `MERCHANT_ADMIN`), and every other path leads to its merchant's page.
+ * list, the create form, any merchant's page and ledger, and the whole audit
+ * log; a merchant user gets its own merchant's page and ledger, its payment
+ * orders (the create form only for `MERCHANT_ADMIN`), and its merchant's audit
+ * log, and every other path leads to its merchant's page.
  */
 function SignedInRoutes({
   principal,
@@ -70,6 +72,7 @@ function SignedInRoutes({
           path="/merchants/:merchantId/ledger"
           element={<LedgerPage principal={principal} />}
         />
+        <Route path="/audit" element={<AuditLogPage principal={principal} />} />
         <Route
           path="/account"
           element={<AccountPage principal={principal} />}
@@ -102,6 +105,7 @@ function SignedInRoutes({
         path="/payments/:paymentIntentId"
         element={<PaymentDetailPage principal={principal} />}
       />
+      <Route path="/audit" element={<AuditLogPage principal={principal} />} />
       <Route path="/account" element={<AccountPage principal={principal} />} />
       <Route path="*" element={<Navigate to={home} replace />} />
     </Routes>

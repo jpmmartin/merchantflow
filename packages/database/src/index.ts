@@ -18,6 +18,7 @@ export { pingDatabase } from './ping.js';
 export type {
   ApiKeyRow,
   ApiKeysTable,
+  AuditEventRow,
   AuditEventsTable,
   Database,
   DatabaseSchema,

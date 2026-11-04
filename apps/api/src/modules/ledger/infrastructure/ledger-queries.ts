@@ -331,3 +331,27 @@ export async function findJournalEntryIdBySource(
     .executeTakeFirst();
   return row?.id;
 }
+
+/**
+ * Every entry of one payment intent of a merchant, oldest first by posting
+ * time and then id, each with its lines.
+ */
+export async function listJournalEntriesOfPaymentIntent(
+  db: Database,
+  key: { readonly merchantId: string; readonly paymentIntentId: string },
+): Promise<JournalEntry[]> {
+  const rows = await db
+    .selectFrom('journal_entries')
+    .selectAll()
+    .where('merchant_id', '=', key.merchantId)
+    .where('payment_intent_id', '=', key.paymentIntentId)
+    .orderBy('posted_at')
+    .orderBy('id')
+    .execute();
+  const lines = await linesOf(
+    db,
+    key.merchantId,
+    rows.map((row) => row.id),
+  );
+  return rows.map((row) => toJournalEntry(row, lines));
+}

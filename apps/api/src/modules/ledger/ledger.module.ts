@@ -7,11 +7,13 @@ import { GetJournalEntryService } from './application/get-journal-entry.service.
 import { LedgerPostingService } from './application/ledger-posting.service.js';
 import { ListJournalEntriesService } from './application/list-journal-entries.service.js';
 import { ListLedgerBalancesService } from './application/list-ledger-balances.service.js';
+import { ListPaymentJournalEntriesService } from './application/list-payment-journal-entries.service.js';
 
 /**
  * Owns the merchant ledger: its accounts, journal entries, and lines, and the
  * endpoints that read them. Other modules post only through the exported
- * `LedgerPostingService`, inside their own transaction. Merchants are read
+ * `LedgerPostingService`, inside their own transaction, and read a payment's
+ * entries through `ListPaymentJournalEntriesService`. Merchants are read
  * through the merchants module.
  */
 @Module({
@@ -22,7 +24,8 @@ import { ListLedgerBalancesService } from './application/list-ledger-balances.se
     ListLedgerBalancesService,
     ListJournalEntriesService,
     GetJournalEntryService,
+    ListPaymentJournalEntriesService,
   ],
-  exports: [LedgerPostingService],
+  exports: [LedgerPostingService, ListPaymentJournalEntriesService],
 })
 export class LedgerModule {}

@@ -54,6 +54,9 @@ export interface AuditEventsTable {
   metadata: ColumnType<JsonObject, string, never>;
 }
 
+/** An `audit_events` row as selected, with every column at its read type. */
+export type AuditEventRow = Selectable<AuditEventsTable>;
+
 /**
  * Row of `api_keys`. Only `revoked_at` can be updated: the other columns have
  * no update type, matching the `api_keys_restrict_update` trigger. `role` lists

@@ -539,6 +539,24 @@ export const TENANT_ROUTES: readonly TenantRoute[] = [
     platformExisting: 403,
     platformMissing: 403,
   },
+  {
+    // The scope comes only from the principal: a merchant key lists only its
+    // own merchant's events.
+    kind: 'collection',
+    route: 'GET /audit-events',
+    request: () => ({ path: '/audit-events' }),
+  },
+  {
+    // The path names an intent and no merchant, and the platform key is
+    // refused for every id, so it gets 403 whether or not the intent exists.
+    kind: 'resource',
+    route: 'GET /payment-intents/:id/timeline',
+    request: (r) => ({
+      path: `/payment-intents/${r.paymentIntentId}/timeline`,
+    }),
+    platformExisting: 403,
+    platformMissing: 403,
+  },
   // `POST /webhooks/stripe/:processorAccountId` is not listed: it is public
   // (`@Public()`), authenticated only by the Stripe signature, so route
   // discovery classifies it as public.

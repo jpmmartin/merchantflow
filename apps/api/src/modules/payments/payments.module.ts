@@ -14,6 +14,7 @@ import { ApplyAuthorizationActionService } from './application/apply-authorizati
 import { CompletePaymentActionService } from './application/complete-payment-action.service.js';
 import { ConfirmPaymentIntentService } from './application/confirm-payment-intent.service.js';
 import { CreatePaymentIntentService } from './application/create-payment-intent.service.js';
+import { GetPaymentHistoryService } from './application/get-payment-history.service.js';
 import { GetPaymentIntentService } from './application/get-payment-intent.service.js';
 import { ListAuthorizationActionsService } from './application/list-authorization-actions.service.js';
 import { ListPaymentAttemptsService } from './application/list-payment-attempts.service.js';
@@ -38,7 +39,9 @@ import { ResolveRefundService } from './application/resolve-refund.service.js';
  * its sale when it is captured, never when it is authorized.
  * Reads touch only the module's own tables. The webhooks module resolves
  * attempts, refunds, and captures and voids from provider events through the
- * exported resolution services, with the same conditional updates.
+ * exported resolution services, with the same conditional updates. The
+ * operations module reads a payment's rows through the exported
+ * `GetPaymentHistoryService` (P-09).
  */
 @Module({
   imports: [
@@ -72,8 +75,10 @@ import { ResolveRefundService } from './application/resolve-refund.service.js';
     ListAuthorizationActionsService,
     ResolveAuthorizationActionService,
     RefreshAuthorizationActionService,
+    GetPaymentHistoryService,
   ],
   exports: [
+    GetPaymentHistoryService,
     ResolveRefundService,
     ResolvePaymentAttemptService,
     ResolveAuthorizationActionService,
