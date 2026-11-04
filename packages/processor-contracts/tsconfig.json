@@ -2,7 +2,8 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "types": ["node"],
-    "outDir": "./dist"
+    "outDir": "./dist",
+    "customConditions": ["@merchantflow/source"]
   },
   "include": ["src/**/*.ts"]
 }
