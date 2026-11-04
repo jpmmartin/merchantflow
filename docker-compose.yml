@@ -42,9 +42,12 @@ services:
       # Recreate the container (docker compose up -d) after changing them.
       # Master key of the processor account secrets (see .env.example).
       CREDENTIALS_MASTER_KEY: ${CREDENTIALS_MASTER_KEY:-}
-      # Stripe test keys for manual checks only; the API never reads them.
-      STRIPE_TEST_SECRET_KEY: ${STRIPE_TEST_SECRET_KEY:-}
-      STRIPE_TEST_PUBLISHABLE_KEY: ${STRIPE_TEST_PUBLISHABLE_KEY:-}
+      # Stripe test keys of two sandboxes (A and B) for manual checks only;
+      # the API never reads them.
+      STRIPE_TEST_A_SECRET_KEY: ${STRIPE_TEST_A_SECRET_KEY:-}
+      STRIPE_TEST_A_PUBLISHABLE_KEY: ${STRIPE_TEST_A_PUBLISHABLE_KEY:-}
+      STRIPE_TEST_B_SECRET_KEY: ${STRIPE_TEST_B_SECRET_KEY:-}
+      STRIPE_TEST_B_PUBLISHABLE_KEY: ${STRIPE_TEST_B_PUBLISHABLE_KEY:-}
     volumes:
       - .:/workspace
       - node-modules:/workspace/node_modules

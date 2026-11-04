@@ -440,11 +440,11 @@ The API reads its configuration from environment variables and refuses to start,
 | `SEED_ADMIN_EMAIL` | `admin@merchantflow.test` | Email of the platform administrator user created by `pnpm db:seed` |
 | `VITE_API_BASE_URL` | `http://localhost:3000/api/v1` | API base URL the web frontend calls; read by Vite, not by the API |
 | `CREDENTIALS_MASTER_KEY` | none | 32 random bytes in standard base64 that encrypt processor secret keys; a secret. Unset: development and test start, and connecting an account answers `503`; production does not start. An invalid value stops startup |
-| `STRIPE_TEST_SECRET_KEY`, `STRIPE_TEST_PUBLISHABLE_KEY` | none | Your Stripe test keys, for manual checks only; the API never reads them |
+| `STRIPE_TEST_A_SECRET_KEY`, `STRIPE_TEST_A_PUBLISHABLE_KEY`, `STRIPE_TEST_B_SECRET_KEY`, `STRIPE_TEST_B_PUBLISHABLE_KEY` | none | Test keys of two of your Stripe sandboxes, A and B, for manual checks only (two sandboxes let you move the default between real accounts); the API never reads them |
 
 [`.env.example`](.env.example) is the reference for every variable. Docker Compose already sets `HOST` and `DATABASE_URL` for the `dev` container, so the quick start needs no `.env` file.
 
-Compose also passes `CREDENTIALS_MASTER_KEY`, `STRIPE_TEST_SECRET_KEY`, and `STRIPE_TEST_PUBLISHABLE_KEY` into the `dev` container from your shell or from the repository-root `.env`, which Compose reads for interpolation. After setting or changing them, recreate the container with `docker compose up -d` (this stops anything running inside it, such as `pnpm dev`), and start the API again. To create a master key:
+Compose also passes `CREDENTIALS_MASTER_KEY` and the four `STRIPE_TEST_A_*` and `STRIPE_TEST_B_*` keys into the `dev` container from your shell or from the repository-root `.env`, which Compose reads for interpolation. After setting or changing them, recreate the container with `docker compose up -d` (this stops anything running inside it, such as `pnpm dev`), and start the API again. To create a master key:
 
 ```bash
 docker compose exec -T dev node -e "console.log(require('node:crypto').randomBytes(32).toString('base64'))"
