@@ -106,3 +106,40 @@ export async function revokeActiveSessionsOfUser(
     .executeTakeFirst();
   return Number(result.numUpdatedRows);
 }
+
+/**
+ * The state that decides whether a session still authenticates, read by the
+ * session's ID together with its user: its expiry, its revocation, and
+ * whether the user is enabled. `undefined` when no session has that ID.
+ */
+export async function findUserSessionStateById(
+  db: Database,
+  sessionId: string,
+): Promise<
+  | {
+      readonly userId: string;
+      readonly expiresAt: Date;
+      readonly revokedAt: Date | null;
+      readonly userEnabled: boolean;
+    }
+  | undefined
+> {
+  const row = await db
+    .selectFrom('user_sessions')
+    .innerJoin('users', 'users.id', 'user_sessions.user_id')
+    .select([
+      'user_sessions.user_id',
+      'user_sessions.expires_at',
+      'user_sessions.revoked_at',
+      'users.enabled',
+    ])
+    .where('user_sessions.id', '=', sessionId)
+    .executeTakeFirst();
+  if (row === undefined) return undefined;
+  return {
+    userId: row.user_id,
+    expiresAt: row.expires_at,
+    revokedAt: row.revoked_at,
+    userEnabled: row.enabled,
+  };
+}

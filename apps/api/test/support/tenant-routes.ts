@@ -60,6 +60,12 @@ const NO_REFUND_ID = '00000000-0000-4000-8000-000000000000';
  */
 const NO_AUTHORIZATION_ACTION_ID = '00000000-0000-4000-8000-000000000001';
 
+/**
+ * A notification ID for the mark-as-read route. An API key is refused before
+ * the notification is read, so no notification needs to exist.
+ */
+const NO_NOTIFICATION_ID = '00000000-0000-4000-8000-000000000002';
+
 /** A request a route entry builds for a set of resources. */
 export interface BuiltRequest {
   /** Path below the API prefix, with its query string if any. */
@@ -556,6 +562,34 @@ export const TENANT_ROUTES: readonly TenantRoute[] = [
     }),
     platformExisting: 403,
     platformMissing: 403,
+  },
+  // Notifications are per signed-in user (P-11): the merchant comes only from
+  // the session, and an API key, which is what the suite sends, is refused
+  // with 403 SESSION_REQUIRED before anything is read. The stream is refused
+  // the same way before it opens, so it never holds a request of the suite.
+  {
+    kind: 'self',
+    route: 'GET /notifications',
+    request: () => ({ path: '/notifications' }),
+    merchantKey: 403,
+  },
+  {
+    kind: 'self',
+    route: 'GET /notifications/stream',
+    request: () => ({ path: '/notifications/stream' }),
+    merchantKey: 403,
+  },
+  {
+    kind: 'self',
+    route: 'POST /notifications/:id/read',
+    request: () => ({ path: `/notifications/${NO_NOTIFICATION_ID}/read` }),
+    merchantKey: 403,
+  },
+  {
+    kind: 'self',
+    route: 'POST /notifications/read-all',
+    request: () => ({ path: '/notifications/read-all' }),
+    merchantKey: 403,
   },
   // `POST /webhooks/stripe/:processorAccountId` is not listed: it is public
   // (`@Public()`), authenticated only by the Stripe signature, so route

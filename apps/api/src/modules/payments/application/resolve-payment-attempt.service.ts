@@ -4,6 +4,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { PinoLogger } from 'nestjs-pino';
 import { DATABASE } from '../../database/database.module.js';
 import { ProcessorAccountsForPaymentsService } from '../../merchants/application/processor-accounts-for-payments.service.js';
+import { RecordNotificationService } from '../../notifications/application/record-notification.service.js';
 import { PROCESSOR_REGISTRY } from '../../processors/application/processor-registry.js';
 import { findPaymentAttemptForProviderObject } from '../infrastructure/payment-attempt-queries.js';
 import { findPaymentIntentByIdForMerchant } from '../infrastructure/payment-intent-queries.js';
@@ -68,7 +69,8 @@ export type ResolvePaymentAttemptResult =
  * platform attempt ID in the provider object's metadata, within the account's
  * merchant and the account itself. A conclusive result completes the
  * confirmation's idempotency record with the answer the confirmation would
- * have stored. A payment that still requires action or is still unknown
+ * have stored, and records a notification for the merchant's users in the
+ * same transaction (P-11). A payment that still requires action or is still unknown
  * changes nothing: an unknown attempt cannot move to `REQUIRES_ACTION`.
  */
 @Injectable()
@@ -79,6 +81,7 @@ export class ResolvePaymentAttemptService {
     private readonly registry: ProcessorAdapterRegistry,
     private readonly accounts: ProcessorAccountsForPaymentsService,
     private readonly applyResolution: ApplyAttemptResolutionService,
+    private readonly notifications: RecordNotificationService,
     private readonly logger: PinoLogger,
   ) {
     this.logger.setContext(ResolvePaymentAttemptService.name);
@@ -158,8 +161,8 @@ export class ResolvePaymentAttemptService {
     const applied = await this.database
       .transaction()
       .setIsolationLevel('read committed')
-      .execute((trx) =>
-        this.applyResolution.execute(trx, {
+      .execute(async (trx) => {
+        const result = await this.applyResolution.execute(trx, {
           actor: command.actor,
           correlationId: command.correlationId,
           intent,
@@ -167,8 +170,24 @@ export class ResolvePaymentAttemptService {
           resolution,
           auditAction: PAYMENT_ATTEMPT_RESOLVED_BY_PROVIDER_EVENT,
           present: command.present,
-        }),
-      );
+        });
+        if (result.outcome === 'APPLIED') {
+          // The merchant's users learn of the change; it commits with it.
+          await this.notifications.execute(trx, {
+            merchantId,
+            type:
+              resolution.kind === 'SUCCEEDED'
+                ? 'PAYMENT_SUCCEEDED'
+                : resolution.kind === 'AUTHORIZED'
+                  ? 'PAYMENT_AUTHORIZED'
+                  : 'PAYMENT_UNSUCCESSFUL',
+            paymentIntentId: intent.id,
+            merchantReference: intent.merchantReference,
+            amount: intent.amount,
+          });
+        }
+        return result;
+      });
     if (applied.outcome === 'NOT_CURRENT') return { outcome: 'NO_CHANGE' };
     this.logger.info(
       {

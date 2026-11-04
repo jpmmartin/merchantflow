@@ -451,6 +451,36 @@ export interface ProcessorEventsTable {
 /** A `processor_events` row as selected. */
 export type ProcessorEventRow = Selectable<ProcessorEventsTable>;
 
+/**
+ * Row of `notifications`, owned by the notifications module (P-11). Rows never
+ * change, matching the `notifications_restrict_update` trigger.
+ */
+export interface NotificationsTable {
+  id: ColumnType<string, string, never>;
+  merchant_id: ColumnType<string, string, never>;
+  type: ColumnType<string, string, never>;
+  payment_intent_id: ColumnType<string, string, never>;
+  refund_id: ColumnType<string | null, string | null, never>;
+  amount_minor: ColumnType<bigint, bigint, never>;
+  currency: ColumnType<string, string, never>;
+  summary: ColumnType<string, string, never>;
+  created_at: ColumnType<Date, Date, never>;
+}
+
+/** A `notifications` row as selected. */
+export type NotificationRow = Selectable<NotificationsTable>;
+
+/**
+ * Row of `notification_reads`, the per-user read state of notifications
+ * (P-11). A read is recorded once and never changes.
+ */
+export interface NotificationReadsTable {
+  merchant_id: ColumnType<string, string, never>;
+  notification_id: ColumnType<string, string, never>;
+  user_id: ColumnType<string, string, never>;
+  read_at: ColumnType<Date, Date, never>;
+}
+
 export interface DatabaseSchema {
   merchants: MerchantsTable;
   audit_events: AuditEventsTable;
@@ -467,6 +497,8 @@ export interface DatabaseSchema {
   journal_entries: JournalEntriesTable;
   journal_lines: JournalLinesTable;
   processor_events: ProcessorEventsTable;
+  notifications: NotificationsTable;
+  notification_reads: NotificationReadsTable;
 }
 
 /** The Kysely instance that every query and transaction goes through. */

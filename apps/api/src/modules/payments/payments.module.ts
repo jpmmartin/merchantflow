@@ -4,6 +4,7 @@ import { DatabaseModule } from '../database/database.module.js';
 import { IdempotencyModule } from '../idempotency/idempotency.module.js';
 import { LedgerModule } from '../ledger/ledger.module.js';
 import { MerchantsModule } from '../merchants/merchants.module.js';
+import { NotificationsModule } from '../notifications/notifications.module.js';
 import { ProcessorsModule } from '../processors/processors.module.js';
 import { PaymentHoldController } from './api/payment-hold.controller.js';
 import { PaymentIntentsController } from './api/payment-intents.controller.js';
@@ -41,7 +42,11 @@ import { ResolveRefundService } from './application/resolve-refund.service.js';
  * attempts, refunds, and captures and voids from provider events through the
  * exported resolution services, with the same conditional updates. The
  * operations module reads a payment's rows through the exported
- * `GetPaymentHistoryService` (P-09).
+ * `GetPaymentHistoryService` (P-09). A change that a provider event or a
+ * provider check makes without a request of the user (a refund resolution, an
+ * attempt resolved by a webhook, a capture or void resolved after an unknown
+ * outcome) records a notification through the notifications module, in the
+ * same transaction (P-11).
  */
 @Module({
   imports: [
@@ -50,6 +55,7 @@ import { ResolveRefundService } from './application/resolve-refund.service.js';
     IdempotencyModule,
     LedgerModule,
     MerchantsModule,
+    NotificationsModule,
     ProcessorsModule,
   ],
   controllers: [

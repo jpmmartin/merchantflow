@@ -2,6 +2,8 @@ import type { ReactNode } from 'react';
 import { NavLink } from 'react-router';
 import type { CurrentPrincipal } from '../api/auth';
 import { navigationFor, roleLabel } from './navigation';
+import { NotificationBell } from './NotificationBell';
+import { NotificationToasts } from './NotificationToasts';
 
 interface LayoutProps {
   readonly principal: CurrentPrincipal;
@@ -10,7 +12,11 @@ interface LayoutProps {
   readonly children: ReactNode;
 }
 
-/** The signed-in frame: a navigation bar whose entries depend on the role. */
+/**
+ * The signed-in frame: a navigation bar whose entries depend on the role,
+ * with the notification bell and toasts for merchant users (inside
+ * `NotificationsProvider`; nothing shows for others).
+ */
 export function Layout({
   principal,
   onLogOut,
@@ -38,6 +44,7 @@ export function Layout({
               </li>
             ))}
           </ul>
+          <NotificationBell />
           <span className="navbar-text me-3">
             {name} · {roleLabel(principal.role)}
           </span>
@@ -51,6 +58,7 @@ export function Layout({
           </button>
         </div>
       </nav>
+      <NotificationToasts />
       <main className="container py-4">{children}</main>
     </>
   );

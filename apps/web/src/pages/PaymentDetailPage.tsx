@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
+import type { AppNotification } from '../api/notifications';
+import { useNotificationListener } from '../components/NotificationsProvider';
 import { Link, useParams } from 'react-router';
 import type { CurrentPrincipal } from '../api/auth';
 import { listJournalEntries, type JournalEntry } from '../api/ledger';
@@ -198,6 +200,17 @@ export function PaymentDetailPage({
     reloadActions,
     reloadTimeline,
   ]);
+
+  // A notification about this payment (a webhook or a check changed it)
+  // reloads every section, as an action on the page does.
+  useNotificationListener(
+    useCallback(
+      (notification: AppNotification) => {
+        if (notification.payment_intent_id === paymentIntentId) void reload();
+      },
+      [paymentIntentId, reload],
+    ),
+  );
 
   useEffect(() => {
     setState({ kind: 'loading' });

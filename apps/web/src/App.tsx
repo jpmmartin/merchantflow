@@ -9,6 +9,7 @@ import {
 import { ApiError, onUnauthorized } from './api/client';
 import { ErrorAlert } from './components/ErrorAlert';
 import { Layout } from './components/Layout';
+import { NotificationsProvider } from './components/NotificationsProvider';
 import { canCreatePayments, homePathFor } from './components/navigation';
 import { AccountPage } from './pages/AccountPage';
 import { AuditLogPage } from './pages/AuditLogPage';
@@ -38,6 +39,11 @@ type AppState =
   | { readonly kind: 'signed-in'; readonly principal: CurrentPrincipal };
 
 const SESSION_ENDED = 'Your session has ended. Sign in again.';
+
+/** Notifications are for merchant users signed in with a session. */
+function receivesNotifications(principal: CurrentPrincipal): boolean {
+  return principal.type === 'USER' && principal.merchant_id !== null;
+}
 
 function initialState(): AppState {
   return readSessionToken() === undefined
@@ -200,8 +206,8 @@ export function App() {
           </button>
         </main>
       );
-    case 'signed-in':
-      return (
+    case 'signed-in': {
+      const layout = (
         <Layout
           principal={state.principal}
           onLogOut={() => void handleLogOut()}
@@ -211,5 +217,13 @@ export function App() {
           <SignedInRoutes principal={state.principal} />
         </Layout>
       );
+      // Only signed-in merchant users receive notifications; leaving this
+      // state (sign-out, or a 401) unmounts the provider and closes its stream.
+      return receivesNotifications(state.principal) ? (
+        <NotificationsProvider>{layout}</NotificationsProvider>
+      ) : (
+        layout
+      );
+    }
   }
 }

@@ -6,6 +6,7 @@ import { ApiKeyAuthGuard } from './api/api-key-auth.guard.js';
 import { AuthController } from './api/auth.controller.js';
 import { AuthenticateApiKeyService } from './application/authenticate-api-key.service.js';
 import { AuthenticateSessionService } from './application/authenticate-session.service.js';
+import { CheckSessionService } from './application/check-session.service.js';
 import { CreateUserService } from './application/create-user.service.js';
 import { DescribeActorsService } from './application/describe-actors.service.js';
 import { DisableUserService } from './application/disable-user.service.js';
@@ -44,6 +45,7 @@ import { RevokeApiKeyService } from './application/revoke-api-key.service.js';
     LogOutService,
     GetCurrentPrincipalService,
     DescribeActorsService,
+    CheckSessionService,
     { provide: APP_GUARD, useClass: ApiKeyAuthGuard },
   ],
   exports: [
@@ -57,6 +59,7 @@ import { RevokeApiKeyService } from './application/revoke-api-key.service.js';
     DisableUserService,
     ListApiKeysService,
     DescribeActorsService,
+    CheckSessionService,
   ],
 })
 export class AuthModule {}

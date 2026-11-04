@@ -21,6 +21,7 @@ import { DATABASE } from '../../database/database.module.js';
 import { CompleteIdempotencyRecordService } from '../../idempotency/application/complete-idempotency-record.service.js';
 import { LedgerPostingService } from '../../ledger/application/ledger-posting.service.js';
 import { ProcessorAccountsForPaymentsService } from '../../merchants/application/processor-accounts-for-payments.service.js';
+import { RecordNotificationService } from '../../notifications/application/record-notification.service.js';
 import { PROCESSOR_REGISTRY } from '../../processors/application/processor-registry.js';
 import { findPaymentAttemptById } from '../infrastructure/payment-attempt-queries.js';
 import {
@@ -182,7 +183,8 @@ function changeOf(
  *   moves the intent back to `PARTIALLY_REFUNDED` or `SUCCEEDED` by the
  *   refunds that still succeeded, so the amount is refundable again.
  *
- * One `PAYMENT_REFUND_RESOLVED` audit event records the change. A refund that
+ * One `PAYMENT_REFUND_RESOLVED` audit event records the change, and one
+ * notification tells the merchant's users about it (P-11). A refund that
  * was `UNKNOWN` had its request's idempotency record in progress; its
  * conclusive answer is stored under that key, as the refund request would
  * have stored it.
@@ -197,6 +199,7 @@ export class ResolveRefundService {
     private readonly accounts: ProcessorAccountsForPaymentsService,
     private readonly ledger: LedgerPostingService,
     private readonly completeRecord: CompleteIdempotencyRecordService,
+    private readonly notifications: RecordNotificationService,
     private readonly logger: PinoLogger,
   ) {
     this.logger.setContext(ResolveRefundService.name);
@@ -460,6 +463,16 @@ export class ResolveRefundService {
         currency: updated.amount.currency,
         journal_entry_id: journalEntryId,
       },
+    });
+
+    // The merchant's users learn of the change; it commits with it.
+    await this.notifications.execute(trx, {
+      merchantId,
+      type: change.detail,
+      paymentIntentId: intent.id,
+      refundId: updated.id,
+      merchantReference: intent.merchantReference,
+      amount: updated.amount,
     });
 
     const view: RefundView = {

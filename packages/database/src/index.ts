@@ -14,6 +14,13 @@ export {
   isDatabaseBusy,
 } from './pool-checkout.js';
 export { isLockNotAvailable, setLocalLockTimeout } from './lock-timeout.js';
+export {
+  NOTIFICATION_LISTENER_SETTINGS,
+  createNotificationListener,
+  notifyInTransaction,
+  type NotificationListener,
+  type NotificationListenerOptions,
+} from './notification-listener.js';
 export { pingDatabase } from './ping.js';
 export type {
   ApiKeyRow,
@@ -34,6 +41,9 @@ export type {
   LedgerAccountRow,
   LedgerAccountsTable,
   MerchantsTable,
+  NotificationReadsTable,
+  NotificationRow,
+  NotificationsTable,
   NewPaymentAttemptRow,
   NewPaymentIntentRow,
   NewProcessorAccountRow,

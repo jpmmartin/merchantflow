@@ -8,6 +8,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { PinoLogger } from 'nestjs-pino';
 import { DATABASE } from '../../database/database.module.js';
 import { ProcessorAccountsForPaymentsService } from '../../merchants/application/processor-accounts-for-payments.service.js';
+import { RecordNotificationService } from '../../notifications/application/record-notification.service.js';
 import { PROCESSOR_REGISTRY } from '../../processors/application/processor-registry.js';
 import { findBlockingAuthorizationAction } from '../infrastructure/authorization-action-queries.js';
 import {
@@ -88,7 +89,9 @@ export type ResolveAuthorizationActionResult =
  * changes nothing. It is applied through `ApplyAuthorizationActionService`
  * with `UNKNOWN` as the expected status, so a late or repeated trigger finds
  * no row and changes nothing, and it completes the request's idempotency
- * record with the answer the request would have stored.
+ * record with the answer the request would have stored. A change that is
+ * applied records a notification for the merchant's users in the same
+ * transaction (P-11).
  *
  * `execute` resolves one action (the action check); `executeForProvider`
  * finds the action of the account's provider payment that waits for an
@@ -103,6 +106,7 @@ export class ResolveAuthorizationActionService {
     private readonly registry: ProcessorAdapterRegistry,
     private readonly accounts: ProcessorAccountsForPaymentsService,
     private readonly applyAction: ApplyAuthorizationActionService,
+    private readonly notifications: RecordNotificationService,
     private readonly logger: PinoLogger,
   ) {
     this.logger.setContext(ResolveAuthorizationActionService.name);
@@ -186,28 +190,6 @@ export class ResolveAuthorizationActionService {
     );
     if (resolution === undefined) return { outcome: 'NO_CHANGE' };
 
-    let applied;
-    try {
-      applied = await this.database
-        .transaction()
-        .setIsolationLevel('read committed')
-        .execute(async (trx) => {
-          await setLocalLockTimeout(trx, PAYMENT_COMMAND_LOCK_TIMEOUT_MILLIS);
-          return this.applyAction.execute(trx, {
-            actor: command.actor,
-            correlationId: command.correlationId,
-            action,
-            attempt,
-            resolution,
-            auditAction: PAYMENT_AUTHORIZATION_ACTION_RESOLVED,
-            present: command.present,
-          });
-        });
-    } catch (error) {
-      if (isLockNotAvailable(error)) return { outcome: 'LOCK_TIMEOUT' };
-      throw error;
-    }
-    if (applied.outcome === 'NOT_CURRENT') return { outcome: 'NO_CHANGE' };
     const change: AuthorizationActionChange =
       action.action === 'CAPTURE'
         ? resolution.status === 'SUCCEEDED'
@@ -216,6 +198,39 @@ export class ResolveAuthorizationActionService {
         : resolution.status === 'SUCCEEDED'
           ? 'VOID_SUCCEEDED'
           : 'VOID_FAILED';
+    let applied;
+    try {
+      applied = await this.database
+        .transaction()
+        .setIsolationLevel('read committed')
+        .execute(async (trx) => {
+          await setLocalLockTimeout(trx, PAYMENT_COMMAND_LOCK_TIMEOUT_MILLIS);
+          const result = await this.applyAction.execute(trx, {
+            actor: command.actor,
+            correlationId: command.correlationId,
+            action,
+            attempt,
+            resolution,
+            auditAction: PAYMENT_AUTHORIZATION_ACTION_RESOLVED,
+            present: command.present,
+          });
+          if (result.outcome === 'APPLIED') {
+            // The merchant's users learn of the change; it commits with it.
+            await this.notifications.execute(trx, {
+              merchantId,
+              type: change,
+              paymentIntentId: result.view.intent.id,
+              merchantReference: result.view.intent.merchantReference,
+              amount: result.view.intent.amount,
+            });
+          }
+          return result;
+        });
+    } catch (error) {
+      if (isLockNotAvailable(error)) return { outcome: 'LOCK_TIMEOUT' };
+      throw error;
+    }
+    if (applied.outcome === 'NOT_CURRENT') return { outcome: 'NO_CHANGE' };
     this.logger.info(
       {
         paymentIntentId: action.paymentIntentId,
