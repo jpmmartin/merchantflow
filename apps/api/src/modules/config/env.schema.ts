@@ -50,6 +50,13 @@ export const envSchema = z.object({
     (value) => (value === '' ? undefined : value),
     z.string().regex(ORIGIN_PATTERN).optional(),
   ),
+  // Serves the OpenAPI document and its interactive UI. Only the exact strings
+  // `true` and `false` are accepted (Zod's defaults would also take `1`, `yes`,
+  // `on`, and any letter case). Unset, `openapi-enabled.ts` applies the default:
+  // on in development and test, off in production.
+  OPENAPI_ENABLED: z
+    .stringbool({ truthy: ['true'], falsy: ['false'], case: 'sensitive' })
+    .optional(),
   // Master key that encrypts the secret keys of processor accounts: 32 random
   // bytes in standard base64 (44 characters). It is a secret, so it has no
   // default. Outside production it may be unset, and connecting an account

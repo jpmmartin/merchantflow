@@ -12,7 +12,7 @@ Today the repository contains the runnable foundation only:
 - liveness and readiness endpoints, `GET /health/live` and `GET /health/ready`;
 - validated environment configuration that stops the API at startup when it is invalid;
 - structured JSON logs with a correlation ID on every request;
-- one error format for every failure, with a stable `code`, a safe message, and the correlation ID, plus request validation with Zod and an OpenAPI document served outside production (see API conventions);
+- one error format for every failure, with a stable `code`, a safe message, and the correlation ID, plus request validation with Zod and an OpenAPI document served when `OPENAPI_ENABLED` allows it (see API conventions);
 - a forward-only SQL migration runner (`pnpm db:migrate`);
 - database tables for merchants, API keys, users, user sessions, processor accounts, an append-only audit trail, idempotency records, payment intents, payment attempts, refunds, a ledger, and notifications with their per-user read state, with the constraints enforced by PostgreSQL itself;
 - API keys: 256 bits of randomness, only a lookup identifier and a SHA-256 hash stored, and an audit event for each issuance and revocation;
@@ -153,7 +153,7 @@ Every error response has the same body, and its `correlationId` equals the `X-Co
 
 The `/health/ready` answer is the exception: its `503` body stays `{"status":"unavailable"}`, because probes read the status.
 
-Outside production (`NODE_ENV` other than `production`) the API serves its OpenAPI document at `GET /docs/openapi.json` and an interactive UI at `GET /docs`. In production neither exists.
+When `OPENAPI_ENABLED` is on, the API serves its OpenAPI document at `GET /docs/openapi.json` and an interactive UI at `GET /docs`, without authentication. Unset, it is on outside production and off in production, where both paths answer `404 NOT_FOUND`; set `OPENAPI_ENABLED=true` and restart the API to serve them there. Business routes still require a token.
 
 ## Merchant endpoints
 
@@ -188,7 +188,7 @@ All of them need an API key or a session token (see Authentication) and use `sna
 - `POST .../users/{userId}/disable` disables the user and revokes all its sessions in the same transaction, so its token gets `401` at the next request and it can no longer sign in. A signed-in user cannot disable itself (`409 USER_SELF_DISABLE_NOT_ALLOWED`). Disabling a disabled user succeeds and changes nothing. There is no re-enable yet.
 - `GET /api/v1/merchants?limit=20&cursor=...` returns `{"data": [...], "next_cursor": "..."}` ordered by creation time and then id. `limit` is 1 to 100 (default 20). Pass `next_cursor` back unchanged as `cursor`; it is `null` on the last page. An invalid cursor is a `400`. A walk over the pages never repeats a merchant, and never skips one that existed when it began.
 - Every change writes one audit event in the same transaction, naming the API key or user that made it and the request's correlation ID (`USER_CREATED` and `USER_DISABLED` for users, with no password; `PROCESSOR_ACCOUNT_CONNECTED`, `PROCESSOR_ACCOUNT_DISABLED`, and `PROCESSOR_ACCOUNT_DEFAULT_CHANGED` for processor accounts, with no key). Updates record the previous and new values of the changed fields.
-- The OpenAPI document (outside production) lists each endpoint with its roles, schemas, error responses, and the `bearer` security scheme.
+- The OpenAPI document (when `OPENAPI_ENABLED` is on) lists each endpoint with its roles, schemas, error responses, and the `bearer` security scheme.
 
 The first platform administrator key cannot be created through the API; `pnpm db:seed` creates it (see Demonstration).
 
@@ -673,7 +673,7 @@ docker compose exec dev pnpm db:seed
 
 ## Authentication
 
-Every route requires an API key or a user session token unless it is explicitly marked public. Send it as `Authorization: Bearer mfk_<lookup id>_<secret>` (API key) or `Authorization: Bearer mfs_<lookup id>_<secret>` (session token). The health probes, `POST /api/v1/auth/login`, and the OpenAPI document (outside production) need neither.
+Every route requires an API key or a user session token unless it is explicitly marked public. Send it as `Authorization: Bearer mfk_<lookup id>_<secret>` (API key) or `Authorization: Bearer mfs_<lookup id>_<secret>` (session token). The health probes, `POST /api/v1/auth/login`, and the OpenAPI document (when `OPENAPI_ENABLED` is on) need neither.
 
 - A missing header, another scheme, a malformed token, an unknown key or session, a wrong secret, a revoked key, a signed-out or expired session, and a session of a disabled user all receive the same `401` with code `UNAUTHENTICATED` and a `WWW-Authenticate: Bearer` header, so a caller cannot tell which case occurred.
 - A valid key whose role a route does not accept receives `403` with code `INSUFFICIENT_ROLE`.

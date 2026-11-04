@@ -5,6 +5,7 @@ import type { NestExpressApplication } from '@nestjs/platform-express';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { resolveCorsOrigins } from './modules/config/cors-origins.js';
 import type { Env } from './modules/config/env.schema.js';
+import { isOpenApiEnabled } from './modules/config/openapi-enabled.js';
 import { replyWithError } from './modules/errors/api/error-reply.js';
 import { createUnmatchedRequestLogger } from './modules/logging/logging.module.js';
 import { STRIPE_WEBHOOK_ROUTE } from './modules/webhooks/api/stripe-webhook.controller.js';
@@ -15,10 +16,10 @@ export const API_PREFIX = 'api/v1';
 /** Health probes keep their paths so orchestrators need no API version. */
 const UNPREFIXED_PATHS = ['health/live', 'health/ready'];
 
-/** Where the interactive documentation is served outside production. */
+/** Where the interactive documentation is served when OpenAPI is enabled. */
 export const OPENAPI_UI_PATH = 'docs';
 
-/** Where the OpenAPI document is served outside production. */
+/** Where the OpenAPI document is served when OpenAPI is enabled. */
 export const OPENAPI_JSON_PATH = 'docs/openapi.json';
 
 /** Request headers a browser caller may send cross-origin. */
@@ -34,8 +35,9 @@ const CORS_EXPOSED_HEADERS = ['Retry-After', 'X-Correlation-Id'];
 /**
  * Applies the settings that belong to the application and not to a module:
  * the versioned prefix, CORS for the configured browser origins, outside
- * production the OpenAPI document with its UI, and the answer for paths no
- * route claims. It initializes the application, so
+ * the OpenAPI document with its UI when `OPENAPI_ENABLED` resolves to true
+ * (on by default outside production, off in production), and the answer for
+ * paths no route claims. It initializes the application, so
  * it runs once, after the logger is installed. Both `main.ts` and the API tests
  * call it, so they run the same setup.
  */
@@ -44,7 +46,12 @@ export async function configureApp(app: INestApplication): Promise<void> {
   const config = app.get<ConfigService<Env, true>>(ConfigService);
   enableCors(app, config);
   keepRawBodyOfWebhooks(app);
-  if (config.get('NODE_ENV', { infer: true }) !== 'production') {
+  if (
+    isOpenApiEnabled({
+      NODE_ENV: config.get('NODE_ENV', { infer: true }),
+      OPENAPI_ENABLED: config.get('OPENAPI_ENABLED', { infer: true }),
+    })
+  ) {
     mountOpenApi(app);
   }
   await app.init();
